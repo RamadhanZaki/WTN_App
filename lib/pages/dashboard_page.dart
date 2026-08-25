@@ -108,12 +108,12 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 60,
+        toolbarHeight: 66,
         scrolledUnderElevation: 0,
         title: Row(children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.asset('assets/logo.png', height: 40, fit: BoxFit.contain),
+            child: Image.asset('assets/logo.png', height: 50, fit: BoxFit.contain),
           ),
           const SizedBox(width: 10),
           const Expanded(
