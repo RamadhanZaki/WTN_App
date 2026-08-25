@@ -52,13 +52,13 @@ class _DashboardPageState extends State<DashboardPage> {
     final now = DateTime.now();
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 76,
+        toolbarHeight: 100,
         scrolledUnderElevation: 0,
         title: Row(children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
             child: Container(
-              width: 58, height: 58,
+              width: 82, height: 82,
               padding: const EdgeInsets.all(2),
               child: Image.asset('assets/logo.png', fit: BoxFit.contain),
             ),
