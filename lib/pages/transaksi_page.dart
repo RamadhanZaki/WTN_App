@@ -79,7 +79,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
               const SizedBox(height: 10),
               TextField(
                 onChanged: _onSearchChanged,
-                decoration: const InputDecoration(hintText: 'Cari asal, motor, barang...', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true),
+                decoration: const InputDecoration(hintText: 'Cari nama, motor, barang...', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true),
               ),
               const SizedBox(height: 8),
               Align(alignment: Alignment.centerLeft, child: Text('Total ${data.length} Transaksi', style: const TextStyle(color: Colors.grey))),
@@ -117,7 +117,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
               Text(t['tanggal'] ?? '-', style: const TextStyle(color: Colors.grey, fontSize: 12)),
             ]),
             const SizedBox(height: 8),
-            _baris('Asal', t['asal']),
+            _baris('Nama', t['asal']),
             _baris('Motor', t['motor']),
             _baris('Barang', t['daftar_barang']),
             _baris('Proses', t['proses']),

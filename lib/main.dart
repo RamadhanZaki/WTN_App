@@ -82,8 +82,8 @@ class _RootShellState extends State<RootShell> {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: selected ? AppColors.biruTua : Colors.grey, size: 24),
-          Text(label, style: TextStyle(fontSize: 10, color: selected ? AppColors.biruTua : Colors.grey)),
+          Icon(icon, color: selected ? AppColors.biruTua : Colors.grey, size: 34),
+          Text(label, style: TextStyle(fontSize: 11, color: selected ? AppColors.biruTua : Colors.grey)),
         ]),
       ),
     );

@@ -271,10 +271,10 @@ class DatabaseHelper {
 
   // ---------- DASHBOARD ----------
 
-  Future<Map<String, dynamic>> getRingkasanBulanIni() async {
+  Future<Map<String, dynamic>> getRingkasanBulanIni({int? bulan, int? tahun}) async {
     final db = await database;
     final now = DateTime.now();
-    final (awal, akhir) = _rentangBulan(now.month, now.year);
+    final (awal, akhir) = _rentangBulan(bulan ?? now.month, tahun ?? now.year);
 
     // Ketiga query ini independen satu sama lain, jadi dijalankan paralel
     // dengan Future.wait alih-alih menunggu satu-satu secara berurutan.

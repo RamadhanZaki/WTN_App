@@ -96,7 +96,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
 
   Future<void> _simpan() async {
     if (_asal.text.trim().isEmpty || motor == null || proses == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Asal, Type, dan Proses wajib diisi')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nama, Type, dan Proses wajib diisi')));
       return;
     }
     if (items.isEmpty) {
@@ -154,7 +154,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
           ]),
           const SizedBox(height: 16),
           _cardWrapper('Detail Order', [
-            TextField(controller: _asal, decoration: const InputDecoration(labelText: 'Asal', border: OutlineInputBorder())),
+            TextField(controller: _asal, decoration: const InputDecoration(labelText: 'Nama', border: OutlineInputBorder())),
             const SizedBox(height: 12),
             _dropdownMaster('Type', motor, masterMotor, (v) => setState(() => motor = v), tableKey: 'master_motor'),
             const SizedBox(height: 12),

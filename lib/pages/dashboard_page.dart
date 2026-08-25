@@ -17,6 +17,8 @@ class _DashboardPageState extends State<DashboardPage> {
   bool loading = true;
   int periodeBulan = 6;
   String tipeGrafik = 'garis'; // 'garis' atau 'batang'
+  int bulanRingkasan = DateTime.now().month;
+  int tahunRingkasan = DateTime.now().year;
 
   final bulanNama = const ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -32,7 +34,7 @@ class _DashboardPageState extends State<DashboardPage> {
     // dengan Future.wait alih-alih menunggu satu-satu (await berurutan)
     // seperti sebelumnya — total waktu loading dashboard jadi jauh lebih cepat.
     final results = await Future.wait([
-      DatabaseHelper.instance.getRingkasanBulanIni(),
+      DatabaseHelper.instance.getRingkasanBulanIni(bulan: bulanRingkasan, tahun: tahunRingkasan),
       DatabaseHelper.instance.getGrafikOmzet(periodeBulan),
       DatabaseHelper.instance.getOrderTerbaru(limit: 10),
       DatabaseHelper.instance.getPengaturan('grafik_omset_tipe', defaultValue: 'garis'),
@@ -52,19 +54,68 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() => grafik = g.reversed.toList());
   }
 
+  Future<void> _pilihPeriodeRingkasan() async {
+    int tempBulan = bulanRingkasan;
+    int tempTahun = tahunRingkasan;
+    final tahunList = List.generate(6, (i) => DateTime.now().year - 3 + i);
+
+    final hasil = await showDialog<Map<String, int>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Pilih Bulan & Tahun'),
+          content: Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                initialValue: tempBulan,
+                decoration: const InputDecoration(labelText: 'Bulan', isDense: true),
+                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(bulanNama[i + 1]))),
+                onChanged: (v) => setDialogState(() => tempBulan = v!),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                initialValue: tempTahun,
+                decoration: const InputDecoration(labelText: 'Tahun', isDense: true),
+                items: tahunList.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
+                onChanged: (v) => setDialogState(() => tempTahun = v!),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, {'bulan': tempBulan, 'tahun': tempTahun}),
+              child: const Text('Terapkan'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (hasil != null) {
+      setState(() {
+        bulanRingkasan = hasil['bulan']!;
+        tahunRingkasan = hasil['tahun']!;
+      });
+      final r = await DatabaseHelper.instance.getRingkasanBulanIni(bulan: bulanRingkasan, tahun: tahunRingkasan);
+      setState(() => ringkasan = r);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 100,
+        toolbarHeight: 132,
         scrolledUnderElevation: 0,
         title: Row(children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Container(
-              width: 82, height: 82,
-              padding: const EdgeInsets.all(2),
+              width: 130, height: 130,
+              padding: EdgeInsets.zero,
               child: Image.asset('assets/logo.png', fit: BoxFit.contain),
             ),
           ),
@@ -82,7 +133,7 @@ class _DashboardPageState extends State<DashboardPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  _omzetCard(now),
+                  _omzetCard(),
                   const SizedBox(height: 20),
                   _grafikCard(),
                   const SizedBox(height: 20),
@@ -101,7 +152,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _omzetCard(DateTime now) {
+  Widget _omzetCard() {
     final langgeng = (ringkasan['langgeng'] as num?) ?? 0;
     final juki = (ringkasan['juki'] as num?) ?? 0;
     final rio = (ringkasan['rio'] as num?) ?? 0;
@@ -119,7 +170,24 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: AppColors.biruTerang.withOpacity(0.3)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Omset Bulan ${bulanNama[now.month]} ${now.year}', style: TextStyle(color: AppColors.biruTerang.withOpacity(0.85), fontSize: 13)),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Expanded(
+            child: Text('Omset Bulan ${bulanNama[bulanRingkasan]} $tahunRingkasan', style: TextStyle(color: AppColors.biruTerang.withOpacity(0.85), fontSize: 13)),
+          ),
+          InkWell(
+            onTap: _pilihPeriodeRingkasan,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(border: Border.all(color: AppColors.biruTerang.withOpacity(0.4)), borderRadius: BorderRadius.circular(8)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.calendar_month, size: 14, color: AppColors.biruTerang),
+                const SizedBox(width: 4),
+                Text('Ganti', style: TextStyle(fontSize: 12, color: AppColors.biruTerang)),
+              ]),
+            ),
+          ),
+        ]),
         const SizedBox(height: 6),
         Text(formatRupiah(ringkasan['omzet']), style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
         if (bagian.isNotEmpty) ...[
