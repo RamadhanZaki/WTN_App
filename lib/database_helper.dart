@@ -15,6 +15,16 @@ class DatabaseHelper {
     return _database!;
   }
 
+  // Dipakai setelah restore backup dari Google Drive: menutup koneksi lama
+  // supaya panggilan `database` berikutnya membuka ulang file .db yang baru
+  // saja ditimpa, bukan memakai koneksi/cache lama.
+  Future<void> tutupDatabase() async {
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
+  }
+
   Future<Database> _initDatabase() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final dbPath = join(documentsDirectory.path, 'wtn_blasting.db');

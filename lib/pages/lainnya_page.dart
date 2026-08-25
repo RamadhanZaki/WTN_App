@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import 'order_form_page.dart';
 import 'kas_keluar_page.dart';
+import 'backup_page.dart';
 
 class LainnyaPage extends StatefulWidget {
   const LainnyaPage({super.key});
@@ -70,6 +71,8 @@ class _LainnyaPageState extends State<LainnyaPage> {
       body: ListView(
         children: [
           ListTile(leading: const Icon(Icons.payments), title: const Text('Pengeluaran'), subtitle: const Text('Pemasukan, pengeluaran, saldo'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KasKeluarPage()))),
+          const Divider(),
+          ListTile(leading: const Icon(Icons.cloud_upload), title: const Text('Backup ke Google Drive'), subtitle: const Text('Sinkron database ke akun Google kamu'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupPage()))),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.show_chart),

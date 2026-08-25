@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'backup_service.dart';
 import 'pages/dashboard_page.dart';
 import 'pages/transaksi_page.dart';
 import 'pages/order_form_page.dart';
@@ -36,6 +37,15 @@ class RootShell extends StatefulWidget {
 
 class _RootShellState extends State<RootShell> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Dijalankan diam-diam di background saat app dibuka; tidak memblokir
+    // tampilan awal dan tidak menampilkan error apapun kalau gagal (mis.
+    // belum login / tidak ada internet) — lihat BackupService.cekAutoBackup.
+    BackupService.instance.cekAutoBackup();
+  }
 
   Widget _buildBody() {
     switch (_index) {
