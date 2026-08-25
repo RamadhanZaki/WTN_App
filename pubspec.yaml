@@ -59,8 +59,12 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/icon/icon.png"
+  image_path_android: "assets/icon/icon_android_transparent.png"
+  image_path: "assets/icon/icon_ios_full.png"
+  adaptive_icon_background: "assets/icon/icon_background.png"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
   min_sdk_android: 21 # opsional, sesuaikan dengan minSdkVersion di android/app/build.gradle
+
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -75,8 +79,6 @@ flutter:
   assets:
     - assets/wtn_blasting.db
     - assets/logo.png
-    - assets/icon/icon.png
-    
 
   # To add assets to your application, add an assets section, like this:
   # assets:

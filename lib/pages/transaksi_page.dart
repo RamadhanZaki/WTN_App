@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import '../app_theme.dart';
@@ -15,6 +16,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
   String search = '';
   List<Map<String, dynamic>> data = [];
   bool loading = true;
+  Timer? _debounce;
 
   final bulanNama = const ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -24,10 +26,25 @@ class _TransaksiPageState extends State<TransaksiPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => loading = true);
     final d = await DatabaseHelper.instance.getTransaksiByBulan(bulan, tahun, search: search);
     setState(() { data = d; loading = false; });
+  }
+
+  // Ketik pencarian sebelumnya langsung memanggil _load() (query DB berat)
+  // di SETIAP huruf yang diketik. Sekarang di-debounce 400ms supaya query
+  // hanya dijalankan setelah user berhenti mengetik sesaat.
+  void _onSearchChanged(String v) {
+    search = v;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), _load);
   }
 
   @override
@@ -61,7 +78,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
               ]),
               const SizedBox(height: 10),
               TextField(
-                onChanged: (v) { search = v; _load(); },
+                onChanged: _onSearchChanged,
                 decoration: const InputDecoration(hintText: 'Cari asal, motor, barang...', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true),
               ),
               const SizedBox(height: 8),

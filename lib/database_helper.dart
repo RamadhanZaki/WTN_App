@@ -31,7 +31,27 @@ class DatabaseHelper {
     return db;
   }
 
+  // Versi skema saat ini. Naikkan angka ini setiap kali menambah migrasi baru
+  // di dalam _migrasi() agar migrasi lama otomatis di-skip pada app yang sudah
+  // pernah dibuka sebelumnya.
+  static const int _dbVersion = 2;
+
   Future<void> _migrasi(Database db) async {
+    // Skip seluruh proses migrasi kalau versi skema sudah paling baru.
+    // Sebelumnya _migrasi() (termasuk PRAGMA table_info, beberapa SELECT
+    // COUNT(*), dan CREATE TABLE IF NOT EXISTS) selalu dijalankan ulang
+    // setiap kali app dibuka, meski tidak ada perubahan skema yang perlu
+    // dilakukan. Ini salah satu penyebab utama loading terasa berat.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pengaturan (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    ''');
+    final versiRow = await db.query('pengaturan', where: 'key = ?', whereArgs: ['db_version']);
+    final versiSekarang = versiRow.isNotEmpty ? int.tryParse(versiRow.first['value'] as String? ?? '0') ?? 0 : 0;
+    if (versiSekarang >= _dbVersion) return;
+
     final kolom = await db.rawQuery("PRAGMA table_info(transaksi)");
     final nama = kolom.map((k) => k['name']).toSet();
 
@@ -99,17 +119,18 @@ class DatabaseHelper {
       ''');
     }
 
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS pengaturan (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      )
-    ''');
-
     await _seedMasterData(db, 'master_motor', ['Tiger', 'MP', 'KPH', '5TP', 'KLX']);
     await _seedMasterData(db, 'master_warna_cat', ['Hitam Glossy', 'Gun Metal Glossy', 'Bronze Metalik Glossy', 'Hitam Textur']);
     await _seedMasterData(db, 'master_warna_lis', ['Merah', 'Biru', 'Kuning', 'Hijau', 'Putih', 'Pink', 'Ungu', 'Emas', 'Silver', 'Hitam']);
     await _seedMasterData(db, 'master_proses', ['PowderCoating & Vaporblasting', 'Powder Coating', 'Vaporblasting', 'Sandblasting', 'Remove Chrome, PowderCoating, Vaporblasting']);
+
+    // Index untuk mempercepat query yang sebelumnya melakukan full table scan
+    // (dashboard, daftar transaksi, autocomplete barang).
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_order_items_transaksi_id ON order_items(transaksi_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_transaksi_tanggal ON transaksi(tanggal)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_harga_bahan_nama ON harga_bahan(nama_barang)');
+
+    await db.insert('pengaturan', {'key': 'db_version', 'value': _dbVersion.toString()}, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> _seedMasterData(Database db, String table, List<String> defaults) async {
@@ -204,9 +225,21 @@ class DatabaseHelper {
     return await db.query('order_items', where: 'transaksi_id = ?', whereArgs: [transaksiId]);
   }
 
+  // Rentang [awal, akhir) satu bulan dalam format 'YYYY-MM-DD', dipakai untuk
+  // perbandingan langsung pada kolom tanggal (bukan strftime(...) = ?),
+  // supaya index idx_transaksi_tanggal bisa dipakai SQLite alih-alih full
+  // table scan setiap kali.
+  (String, String) _rentangBulan(int bulan, int tahun) {
+    final awal = '$tahun-${bulan.toString().padLeft(2, '0')}-01';
+    final bulanBerikut = bulan == 12 ? 1 : bulan + 1;
+    final tahunBerikut = bulan == 12 ? tahun + 1 : tahun;
+    final akhir = '$tahunBerikut-${bulanBerikut.toString().padLeft(2, '0')}-01';
+    return (awal, akhir);
+  }
+
   Future<List<Map<String, dynamic>>> getTransaksiByBulan(int bulan, int tahun, {String search = ''}) async {
     final db = await database;
-    final bulanStr = bulan.toString().padLeft(2, '0');
+    final (awal, akhir) = _rentangBulan(bulan, tahun);
     final likeSearch = '%$search%';
     return await db.rawQuery('''
       SELECT t.*,
@@ -214,12 +247,12 @@ class DatabaseHelper {
         (SELECT COUNT(*) FROM order_items WHERE transaksi_id = t.id) as jumlah_item,
         (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
       FROM transaksi t
-      WHERE strftime('%m', t.tanggal) = ? AND strftime('%Y', t.tanggal) = ?
+      WHERE t.tanggal >= ? AND t.tanggal < ?
         AND (t.asal LIKE ? OR t.motor LIKE ? OR EXISTS (
           SELECT 1 FROM order_items oi WHERE oi.transaksi_id = t.id AND oi.barang LIKE ?
         ))
       ORDER BY t.tanggal DESC, t.id DESC
-    ''', [bulanStr, tahun.toString(), likeSearch, likeSearch, likeSearch]);
+    ''', [awal, akhir, likeSearch, likeSearch, likeSearch]);
   }
 
   Future<List<Map<String, dynamic>>> getOrderTerbaru({int limit = 15}) async {
@@ -241,27 +274,32 @@ class DatabaseHelper {
   Future<Map<String, dynamic>> getRingkasanBulanIni() async {
     final db = await database;
     final now = DateTime.now();
-    final bulanStr = now.month.toString().padLeft(2, '0');
-    final tahunStr = now.year.toString();
+    final (awal, akhir) = _rentangBulan(now.month, now.year);
 
-    final omzetRow = await db.rawQuery('''
-      SELECT SUM(oi.harga) as total
-      FROM order_items oi
-      JOIN transaksi t ON t.id = oi.transaksi_id
-      WHERE strftime('%m', t.tanggal) = ? AND strftime('%Y', t.tanggal) = ?
-    ''', [bulanStr, tahunStr]);
+    // Ketiga query ini independen satu sama lain, jadi dijalankan paralel
+    // dengan Future.wait alih-alih menunggu satu-satu secara berurutan.
+    final results = await Future.wait([
+      db.rawQuery('''
+        SELECT SUM(oi.harga) as total
+        FROM order_items oi
+        JOIN transaksi t ON t.id = oi.transaksi_id
+        WHERE t.tanggal >= ? AND t.tanggal < ?
+      ''', [awal, akhir]),
+      db.rawQuery('''
+        SELECT SUM(bagian_langgeng) as langgeng, SUM(bagian_juki) as juki, SUM(bagian_rio) as rio
+        FROM transaksi
+        WHERE tanggal >= ? AND tanggal < ?
+      ''', [awal, akhir]),
+      db.rawQuery('''
+        SELECT status, COUNT(*) as c FROM transaksi
+        WHERE tanggal >= ? AND tanggal < ?
+        GROUP BY status
+      ''', [awal, akhir]),
+    ]);
 
-    final bagianRow = await db.rawQuery('''
-      SELECT SUM(bagian_langgeng) as langgeng, SUM(bagian_juki) as juki, SUM(bagian_rio) as rio
-      FROM transaksi
-      WHERE strftime('%m', tanggal) = ? AND strftime('%Y', tanggal) = ?
-    ''', [bulanStr, tahunStr]);
-
-    final statusCount = await db.rawQuery('''
-      SELECT status, COUNT(*) as c FROM transaksi
-      WHERE strftime('%m', tanggal) = ? AND strftime('%Y', tanggal) = ?
-      GROUP BY status
-    ''', [bulanStr, tahunStr]);
+    final omzetRow = results[0];
+    final bagianRow = results[1];
+    final statusCount = results[2];
 
     final counts = {'pending': 0, 'antre': 0, 'proses': 0, 'selesai': 0};
     int total = 0;

@@ -28,15 +28,20 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _load() async {
     setState(() => loading = true);
-    final r = await DatabaseHelper.instance.getRingkasanBulanIni();
-    final g = await DatabaseHelper.instance.getGrafikOmzet(periodeBulan);
-    final t = await DatabaseHelper.instance.getOrderTerbaru(limit: 10);
-    final tg = await DatabaseHelper.instance.getPengaturan('grafik_omset_tipe', defaultValue: 'garis');
+    // Keempat query ini independen satu sama lain, jadi dijalankan paralel
+    // dengan Future.wait alih-alih menunggu satu-satu (await berurutan)
+    // seperti sebelumnya — total waktu loading dashboard jadi jauh lebih cepat.
+    final results = await Future.wait([
+      DatabaseHelper.instance.getRingkasanBulanIni(),
+      DatabaseHelper.instance.getGrafikOmzet(periodeBulan),
+      DatabaseHelper.instance.getOrderTerbaru(limit: 10),
+      DatabaseHelper.instance.getPengaturan('grafik_omset_tipe', defaultValue: 'garis'),
+    ]);
     setState(() {
-      ringkasan = r;
-      grafik = g.reversed.toList();
-      terbaru = t;
-      tipeGrafik = tg;
+      ringkasan = results[0] as Map<String, dynamic>;
+      grafik = (results[1] as List<Map<String, dynamic>>).reversed.toList();
+      terbaru = results[2] as List<Map<String, dynamic>>;
+      tipeGrafik = results[3] as String;
       loading = false;
     });
   }

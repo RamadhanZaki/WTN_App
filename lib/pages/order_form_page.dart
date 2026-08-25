@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../database_helper.dart';
@@ -310,6 +311,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
   List<Map<String, dynamic>> saran = [];
   List<Map<String, dynamic>> masterWarnaCat = [];
   List<Map<String, dynamic>> masterWarnaLis = [];
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -331,10 +333,25 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
     setState(() {});
   }
 
-  Future<void> _cari(String q) async {
-    if (q.length < 2) { setState(() => saran = []); return; }
-    final hasil = await DatabaseHelper.instance.cariBarang(q);
-    setState(() => saran = hasil);
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _cari(String q) {
+    if (q.length < 2) {
+      _debounce?.cancel();
+      setState(() => saran = []);
+      return;
+    }
+    // Autocomplete sebelumnya query DB di setiap huruf yang diketik.
+    // Di-debounce 300ms supaya tidak query berlebihan saat mengetik cepat.
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
+      final hasil = await DatabaseHelper.instance.cariBarang(q);
+      if (mounted) setState(() => saran = hasil);
+    });
   }
 
   void _pilihSaran(Map<String, dynamic> s) {
