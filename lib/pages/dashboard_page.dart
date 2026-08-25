@@ -108,17 +108,12 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 96,
+        toolbarHeight: 60,
         scrolledUnderElevation: 0,
         title: Row(children: [
-          // Sebelumnya logo dipaksa ke kotak 130x130 (fixed width & height),
-          // sehingga BoxFit.contain menyisakan ruang kosong atas-bawah kalau
-          // rasio gambar logo tidak persegi. Sekarang hanya tinggi yang
-          // dibatasi, lebar mengikuti rasio asli gambar → tidak ada spasi
-          // kosong di dalam kotaknya.
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.asset('assets/logo.png', height: 90, fit: BoxFit.contain),
+            child: Image.asset('assets/logo.png', height: 40, fit: BoxFit.contain),
           ),
           const SizedBox(width: 10),
           const Expanded(
