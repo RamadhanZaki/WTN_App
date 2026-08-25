@@ -110,16 +110,22 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(
         toolbarHeight: 66,
         scrolledUnderElevation: 0,
-        title: Row(children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.asset('assets/logo.png', height: 50, fit: BoxFit.contain),
-          ),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text('MANAGEMENT SYSTEM', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15), overflow: TextOverflow.ellipsis),
-          ),
-        ]),
+        title: Transform.translate(
+          // Logo dinaikkan 1 tingkat (sebelumnya sejajar center toolbar,
+          // sekarang digeser ke atas) supaya tidak terlalu turun/mepet
+          // ke tengah AppBar.
+          offset: const Offset(0, -8),
+          child: Row(children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset('assets/logo.png', height: 50, fit: BoxFit.contain),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('MANAGEMENT SYSTEM', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15), overflow: TextOverflow.ellipsis),
+            ),
+          ]),
+        ),
         actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)],
       ),
       body: loading

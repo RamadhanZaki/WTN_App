@@ -373,4 +373,25 @@ class DatabaseHelper {
     else { data['pengeluaran_alat'] = nominal; data['saldo_kas_alat'] = saldoBaru; }
     await db.insert('kas_keluar', data);
   }
+
+  // Daftar pengeluaran (kas_keluar) untuk satu bulan tertentu, lengkap dengan
+  // label sumber kas (Kas / Vapor / Maintenance) dan nominalnya masing-masing,
+  // dipakai untuk menampilkan riwayat pengeluaran per bulan di halaman Pengeluaran.
+  Future<List<Map<String, dynamic>>> getPengeluaranByBulan(int bulan, int tahun) async {
+    final db = await database;
+    final (awal, akhir) = _rentangBulan(bulan, tahun);
+    return await db.rawQuery('''
+      SELECT id, tanggal, catatan,
+        CASE
+          WHEN pengeluaran_kas IS NOT NULL THEN 'Kas'
+          WHEN pengeluaran_vapor IS NOT NULL THEN 'Vapor'
+          WHEN pengeluaran_alat IS NOT NULL THEN 'Maintenance'
+        END as sumber,
+        COALESCE(pengeluaran_kas, pengeluaran_vapor, pengeluaran_alat) as nominal
+      FROM kas_keluar
+      WHERE tanggal >= ? AND tanggal < ?
+        AND (pengeluaran_kas IS NOT NULL OR pengeluaran_vapor IS NOT NULL OR pengeluaran_alat IS NOT NULL)
+      ORDER BY tanggal DESC, id DESC
+    ''', [awal, akhir]);
+  }
 }

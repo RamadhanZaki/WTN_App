@@ -69,7 +69,7 @@ class _LainnyaPageState extends State<LainnyaPage> {
       appBar: AppBar(title: const Text('Lainnya')),
       body: ListView(
         children: [
-          ListTile(leading: const Icon(Icons.payments), title: const Text('Kas'), subtitle: const Text('Pemasukan, pengeluaran, saldo'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KasKeluarPage()))),
+          ListTile(leading: const Icon(Icons.payments), title: const Text('Pengeluaran'), subtitle: const Text('Pemasukan, pengeluaran, saldo'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KasKeluarPage()))),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.show_chart),

@@ -68,7 +68,7 @@ class _RootShellState extends State<RootShell> {
           Expanded(child: _navItem(0, Icons.home, 'Dashboard')),
           Expanded(child: _navItem(1, Icons.receipt_long, 'Transaksi')),
           const SizedBox(width: 40),
-          Expanded(child: _navItem(3, Icons.payments, 'Kas')),
+          Expanded(child: _navItem(3, Icons.payments, 'Pengeluaran')),
           Expanded(child: _navItem(4, Icons.apps, 'Lainnya')),
         ]),
       ),
