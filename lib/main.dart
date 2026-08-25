@@ -65,11 +65,11 @@ class _RootShellState extends State<RootShell> {
         shape: const CircularNotchedRectangle(),
         notchMargin: 8,
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-          _navItem(0, Icons.home, 'Dashboard'),
-          _navItem(1, Icons.receipt_long, 'Transaksi'),
+          Expanded(child: _navItem(0, Icons.home, 'Dashboard')),
+          Expanded(child: _navItem(1, Icons.receipt_long, 'Transaksi')),
           const SizedBox(width: 40),
-          _navItem(3, Icons.payments, 'Kas'),
-          _navItem(4, Icons.apps, 'Lainnya'),
+          Expanded(child: _navItem(3, Icons.payments, 'Kas')),
+          Expanded(child: _navItem(4, Icons.apps, 'Lainnya')),
         ]),
       ),
     );
@@ -77,8 +77,18 @@ class _RootShellState extends State<RootShell> {
 
   Widget _navItem(int i, IconData icon, String label) {
     final selected = _index == i;
-    return InkWell(
+    // Sebelumnya InkWell tanpa borderRadius/warna splash menampilkan efek
+    // highlight kotak penuh saat ditekan, dan area tap-nya sempit (hanya
+    // sebesar konten). Sekarang: splash dibuat halus & mengikuti bentuk
+    // bulat (bukan kotak), dan seluruh item (dibungkus Expanded di Row di
+    // atas) jadi area tap sehingga lebih mudah dipencet.
+    return InkResponse(
       onTap: () => setState(() => _index = i),
+      radius: 40,
+      highlightShape: BoxShape.circle,
+      splashColor: AppColors.biruTua.withOpacity(0.12),
+      highlightColor: AppColors.biruTua.withOpacity(0.06),
+      containedInkWell: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
