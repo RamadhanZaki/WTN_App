@@ -64,7 +64,9 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
           const SizedBox(width: 10),
-          const Text('WTN BLASTING', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const Expanded(
+            child: Text('MANAGEMENT SYSTEM', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15), overflow: TextOverflow.ellipsis),
+          ),
         ]),
         actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)],
       ),
