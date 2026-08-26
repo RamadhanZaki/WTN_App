@@ -35,6 +35,39 @@ class AppColors {
       default: return 'Pending';
     }
   }
+
+  // ---------- STATUS PEMBAYARAN ----------
+  static Color bayarBg(String status) {
+    switch (status) {
+      case 'lunas': return const Color(0xFFEAF3DE);
+      case 'dp': return const Color(0xFFE6F1FB);
+      case 'piutang': return const Color(0xFFFBE3E0);
+      default: return const Color(0xFFF1EFE8);
+    }
+  }
+
+  static Color bayarText(String status) {
+    switch (status) {
+      case 'lunas': return const Color(0xFF27500A);
+      case 'dp': return const Color(0xFF185FA5);
+      case 'piutang': return const Color(0xFFA02818);
+      default: return const Color(0xFF444441);
+    }
+  }
+
+  static String bayarLabel(String status) {
+    switch (status) {
+      case 'lunas': return 'Lunas';
+      case 'dp': return 'DP';
+      case 'piutang': return 'Piutang';
+      default: return 'Belum Bayar';
+    }
+  }
+
+  // ---------- STATUS PENGAMBILAN ----------
+  static Color ambilBg(String status) => status == 'sudah_diambil' ? const Color(0xFFEAF3DE) : const Color(0xFFFAEEDA);
+  static Color ambilText(String status) => status == 'sudah_diambil' ? const Color(0xFF27500A) : const Color(0xFF854F0B);
+  static String ambilLabel(String status) => status == 'sudah_diambil' ? 'Sudah Diambil' : 'Belum Diambil';
 }
 
 String formatRupiah(dynamic value, {bool withRp = true}) {

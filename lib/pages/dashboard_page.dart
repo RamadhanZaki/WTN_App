@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import '../app_theme.dart';
-import 'order_form_page.dart';
 import 'transaksi_page.dart';
+import 'detail_transaksi_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -310,7 +310,7 @@ class _DashboardPageState extends State<DashboardPage> {
           Text(formatRupiah(t['total_harga']), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
         ]),
         onTap: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => OrderFormPage(orderId: t['id'])));
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => DetailTransaksiPage(orderId: t['id'])));
           _load();
         },
       ),

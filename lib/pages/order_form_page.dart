@@ -17,7 +17,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
   final _asal = TextEditingController();
   String? motor;
   String? proses;
-  String status = 'pending';
+  String status = 'antre'; // order baru otomatis 'Antre' sesuai ketentuan
 
   List<Map<String, dynamic>> items = [];
   final _langgeng = TextEditingController();
@@ -81,7 +81,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
     final hasil = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _TambahBarangSheet(existing: existing),
+      builder: (_) => _TambahBarangSheet(existing: existing, motor: motor, proses: proses),
     );
     if (hasil != null) {
       setState(() {
@@ -302,7 +302,9 @@ class _OrderFormPageState extends State<OrderFormPage> {
 
 class _TambahBarangSheet extends StatefulWidget {
   final Map<String, dynamic>? existing;
-  const _TambahBarangSheet({this.existing});
+  final String? motor;
+  final String? proses;
+  const _TambahBarangSheet({this.existing, this.motor, this.proses});
   @override
   State<_TambahBarangSheet> createState() => _TambahBarangSheetState();
 }
@@ -369,10 +371,17 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
     });
   }
 
-  void _pilihSaran(Map<String, dynamic> s) {
+  Future<void> _pilihSaran(Map<String, dynamic> s) async {
+    final nama = s['nama_barang'] as String;
+    // Prioritas harga otomatis: kombinasi Type Motor + Barang + Proses.
+    // Kalau kombinasi itu belum pernah dipakai, fallback ke harga_terakhir
+    // per-nama-barang saja (katalog_barang), seperti sebelumnya.
+    final hargaKombinasi = await DatabaseHelper.instance.cariHargaKombinasi(
+      widget.motor ?? '', nama, widget.proses ?? '',
+    );
     setState(() {
-      _barang.text = s['nama_barang'];
-      hargaDariDaftar = (s['harga_terakhir'] as num?)?.toDouble();
+      _barang.text = nama;
+      hargaDariDaftar = hargaKombinasi ?? (s['harga_terakhir'] as num?)?.toDouble();
       pakaiHargaManual = hargaDariDaftar == null;
       saran = [];
     });
@@ -392,9 +401,15 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi harga satuan terlebih dahulu')));
       return;
     }
-    // Simpan/perbarui katalog barang supaya harga_terakhir selalu yang terbaru,
-    // baik barang baru maupun barang lama yang harganya baru saja diubah.
+    // Simpan/perbarui katalog barang (untuk autocomplete nama) supaya
+    // harga_terakhir selalu yang terbaru...
     await DatabaseHelper.instance.insertOrUpdateKatalogBarang(_barang.text.trim(), hargaSatuan);
+    // ...dan simpan/perbarui harga per KOMBINASI Type Motor + Barang + Proses
+    // (dasar utama harga otomatis). Histori harga lama otomatis tersimpan di
+    // dalam method ini, tidak pernah dihapus.
+    await DatabaseHelper.instance.insertOrUpdateHargaKombinasi(
+      widget.motor ?? '', _barang.text.trim(), widget.proses ?? '', hargaSatuan,
+    );
     Navigator.pop(context, {
       'barang': _barang.text.trim(),
       'kode': _kode.text.trim(),

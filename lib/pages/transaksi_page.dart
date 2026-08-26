@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import '../app_theme.dart';
-import 'order_form_page.dart';
+import 'detail_transaksi_page.dart';
 
 class TransaksiPage extends StatefulWidget {
   const TransaksiPage({super.key});
@@ -103,10 +103,12 @@ class _TransaksiPageState extends State<TransaksiPage> {
 
   Widget _card(Map<String, dynamic> t) {
     final status = (t['status'] ?? 'pending') as String;
+    final statusBayar = (t['status_pembayaran'] ?? 'belum_bayar') as String;
+    final statusAmbil = (t['status_pengambilan'] ?? 'belum_diambil') as String;
     return Card(
       child: InkWell(
         onTap: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => OrderFormPage(orderId: t['id'])));
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => DetailTransaksiPage(orderId: t['id'])));
           _load();
         },
         child: Padding(
@@ -123,14 +125,22 @@ class _TransaksiPageState extends State<TransaksiPage> {
             _baris('Proses', t['proses']),
             _baris('Harga', formatRupiah(t['total_harga'])),
             const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: AppColors.statusBg(status), borderRadius: BorderRadius.circular(8)),
-              child: Text(AppColors.statusLabel(status).toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.statusText(status))),
-            ),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              _badge(AppColors.statusLabel(status), AppColors.statusBg(status), AppColors.statusText(status)),
+              _badge(AppColors.ambilLabel(statusAmbil), AppColors.ambilBg(statusAmbil), AppColors.ambilText(statusAmbil)),
+              _badge(AppColors.bayarLabel(statusBayar), AppColors.bayarBg(statusBayar), AppColors.bayarText(statusBayar)),
+            ]),
           ]),
         ),
       ),
+    );
+  }
+
+  Widget _badge(String label, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+      child: Text(label.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fg)),
     );
   }
 

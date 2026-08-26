@@ -44,7 +44,7 @@ class DatabaseHelper {
   // Versi skema saat ini. Naikkan angka ini setiap kali menambah migrasi baru
   // di dalam _migrasi() agar migrasi lama otomatis di-skip pada app yang sudah
   // pernah dibuka sebelumnya.
-  static const int _dbVersion = 5;
+  static const int _dbVersion = 6;
 
   Future<void> _migrasi(Database db) async {
     // Skip seluruh proses migrasi kalau versi skema sudah paling baru.
@@ -230,6 +230,97 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX IF NOT EXISTS idx_order_items_transaksi_id ON order_items(transaksi_id)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_transaksi_tanggal ON transaksi(tanggal)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_harga_bahan_nama ON harga_bahan(nama_barang)');
+
+    // v6: Status Pembayaran (Belum Bayar/DP/Lunas/Piutang) + Status Pengambilan
+    // (Belum/Sudah Diambil) sebagai kolom TERPISAH dari status pengerjaan lama
+    // ('status': pending/antre/proses/selesai) — tidak menimpa kolom itu sama
+    // sekali. Juga tabel BARU: `pembayaran` (histori tiap pembayaran masuk,
+    // tidak pernah dihapus) dan `harga_kombinasi` + `harga_kombinasi_histori`
+    // (harga otomatis berdasarkan Type Motor + Barang + Proses, sesuai
+    // permintaan — terpisah dari `katalog_barang` yang tetap dipakai untuk
+    // autocomplete nama barang seperti sebelumnya, TIDAK diubah/dihapus).
+    await tambahKolom("status_pembayaran", "TEXT DEFAULT 'belum_bayar'");
+    await tambahKolom('total_dibayar', 'REAL DEFAULT 0');
+    await tambahKolom("status_pengambilan", "TEXT DEFAULT 'belum_diambil'");
+    await tambahKolom('waktu_pengambilan', 'TEXT');
+
+    // Tambah kolom "pemasukan" pada tabel kas_keluar yang sudah ada, supaya
+    // pembayaran aktual dari pelanggan bisa dicatat sebagai penambah saldo
+    // kas TANPA mengubah struktur/perhitungan pengeluaran yang sudah berjalan
+    // (kolom pengeluaran_* & saldo_* lama tidak disentuh).
+    final kolomKas = await db.rawQuery("PRAGMA table_info(kas_keluar)");
+    final namaKolomKas = kolomKas.map((k) => k['name']).toSet();
+    Future<void> tambahKolomKas(String nm, String tipe) async {
+      if (!namaKolomKas.contains(nm)) {
+        await db.execute("ALTER TABLE kas_keluar ADD COLUMN $nm $tipe");
+      }
+    }
+    await tambahKolomKas('pemasukan_kas', 'REAL');
+    await tambahKolomKas('pemasukan_vapor', 'REAL');
+    await tambahKolomKas('pemasukan_alat', 'REAL');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pembayaran (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaksi_id INTEGER NOT NULL,
+        nominal REAL NOT NULL,
+        tanggal TEXT NOT NULL,
+        catatan TEXT,
+        kas_jenis TEXT NOT NULL DEFAULT 'kas'
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pembayaran_transaksi_id ON pembayaran(transaksi_id)');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS harga_kombinasi (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        motor TEXT NOT NULL DEFAULT '',
+        barang TEXT NOT NULL,
+        proses TEXT NOT NULL DEFAULT '',
+        harga REAL,
+        updated_at TEXT
+      )
+    ''');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_harga_kombinasi_unique ON harga_kombinasi(motor, barang, proses)');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS harga_kombinasi_histori (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        motor TEXT, barang TEXT, proses TEXT,
+        harga_lama REAL, harga_baru REAL,
+        tanggal TEXT
+      )
+    ''');
+
+    // Backfill sekali jalan dari order_items + transaksi lama, supaya harga
+    // otomatis kombinasi langsung "belajar" dari histori transaksi yang
+    // sudah ada (bukan mulai dari kosong). Data transaksi lama SENDIRI
+    // sama sekali tidak diubah — ini cuma membaca lalu mengisi tabel baru.
+    final adaHargaKombinasi = await db.rawQuery("SELECT COUNT(*) as c FROM harga_kombinasi");
+    if ((adaHargaKombinasi.first['c'] as int) == 0) {
+      final rowsLamaHarga = await db.rawQuery('''
+        SELECT t.motor as motor, oi.barang as barang, t.proses as proses,
+               oi.harga_satuan as harga_satuan, t.tanggal as tanggal
+        FROM order_items oi
+        JOIN transaksi t ON t.id = oi.transaksi_id
+        WHERE oi.barang IS NOT NULL AND oi.barang != ''
+        ORDER BY t.tanggal ASC, t.id ASC, oi.id ASC
+      ''');
+      for (final r in rowsLamaHarga) {
+        final motorV = (r['motor'] as String? ?? '').trim();
+        final barangV = (r['barang'] as String? ?? '').trim();
+        final prosesV = (r['proses'] as String? ?? '').trim();
+        final hargaV = (r['harga_satuan'] as num?)?.toDouble();
+        if (barangV.isEmpty || hargaV == null) continue;
+        // conflictAlgorithm.replace: karena data diurutkan tanggal ASC, nilai
+        // yang tersimpan akhir adalah harga PALING BARU untuk kombinasi itu.
+        await db.insert(
+          'harga_kombinasi',
+          {'motor': motorV, 'barang': barangV, 'proses': prosesV, 'harga': hargaV, 'updated_at': r['tanggal']},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    }
 
     await db.insert('pengaturan', {'key': 'db_version', 'value': _dbVersion.toString()}, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -472,6 +563,156 @@ class DatabaseHelper {
   Future<int> insertHargaBahan(String nama, double harga) async {
     final db = await database;
     return await db.insert('harga_bahan', {'nama_barang': nama, 'harga': harga});
+  }
+
+  // ---------- HARGA KOMBINASI (Type Motor + Barang + Proses) ----------
+
+  // Dasar "harga otomatis" utama: dicari berdasarkan kombinasi motor+barang+
+  // proses. Kalau belum pernah ada kombinasi itu, caller (UI) akan fallback
+  // ke harga_terakhir per-nama-barang saja (katalog_barang, seperti semula).
+  Future<double?> cariHargaKombinasi(String motor, String barang, String proses) async {
+    final db = await database;
+    final r = await db.query(
+      'harga_kombinasi',
+      where: 'motor = ? COLLATE NOCASE AND barang = ? COLLATE NOCASE AND proses = ? COLLATE NOCASE',
+      whereArgs: [motor.trim(), barang.trim(), proses.trim()],
+    );
+    if (r.isEmpty || r.first['harga'] == null) return null;
+    return (r.first['harga'] as num).toDouble();
+  }
+
+  // Dipanggil setiap kali barang disimpan ke sebuah order (sama seperti
+  // insertOrUpdateKatalogBarang, tapi per kombinasi). Histori harga LAMA
+  // selalu disimpan ke harga_kombinasi_histori sebelum ditimpa — tidak pernah
+  // dihapus.
+  Future<void> insertOrUpdateHargaKombinasi(String motor, String barang, String proses, double harga) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final m = motor.trim();
+    final b = barang.trim();
+    final p = proses.trim();
+    final existing = await db.query(
+      'harga_kombinasi',
+      where: 'motor = ? COLLATE NOCASE AND barang = ? COLLATE NOCASE AND proses = ? COLLATE NOCASE',
+      whereArgs: [m, b, p],
+    );
+    if (existing.isEmpty) {
+      await db.insert('harga_kombinasi', {'motor': m, 'barang': b, 'proses': p, 'harga': harga, 'updated_at': now});
+    } else {
+      final hargaLama = (existing.first['harga'] as num?)?.toDouble();
+      if (hargaLama != null && hargaLama != harga) {
+        await db.insert('harga_kombinasi_histori', {
+          'motor': m, 'barang': b, 'proses': p,
+          'harga_lama': hargaLama, 'harga_baru': harga, 'tanggal': now,
+        });
+      }
+      await db.update('harga_kombinasi', {'harga': harga, 'updated_at': now}, where: 'id = ?', whereArgs: [existing.first['id']]);
+    }
+  }
+
+  // ---------- STATUS PENGERJAAN / PENGAMBILAN / PEMBAYARAN ----------
+
+  double _hitungTotalHarga(List<Map<String, dynamic>> items) =>
+      items.fold(0.0, (sum, it) => sum + ((it['harga'] as num?)?.toDouble() ?? 0));
+
+  // Aturan status pembayaran otomatis:
+  //  - belum ada pembayaran sama sekali -> Belum Bayar
+  //  - sudah bayar sebagian (< total)   -> DP, KECUALI barang sudah diambil
+  //    tapi belum lunas -> Piutang
+  //  - sudah bayar >= total             -> Lunas
+  String hitungStatusPembayaran(double totalDibayar, double totalHarga, String statusPengambilan) {
+    if (totalHarga <= 0 || totalDibayar <= 0) return 'belum_bayar';
+    if (totalDibayar >= totalHarga) return 'lunas';
+    return statusPengambilan == 'sudah_diambil' ? 'piutang' : 'dp';
+  }
+
+  Future<void> updateStatusPengerjaan(int id, String status) async {
+    final db = await database;
+    await db.update('transaksi', {'status': status}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Status pengambilan HANYA boleh 'sudah_diambil' ketika pengerjaan sudah
+  // 'selesai' — validasi juga dilakukan di UI, tapi dijaga lagi di sini.
+  Future<void> updateStatusPengambilan(int id, String status) async {
+    final db = await database;
+    final header = await getOrderHeader(id);
+    if (status == 'sudah_diambil' && (header?['status'] as String?) != 'selesai') {
+      throw Exception('Barang belum bisa diambil sebelum status pengerjaan Selesai');
+    }
+    await db.update('transaksi', {
+      'status_pengambilan': status,
+      'waktu_pengambilan': status == 'sudah_diambil' ? DateTime.now().toIso8601String() : null,
+    }, where: 'id = ?', whereArgs: [id]);
+
+    // status pembayaran ikut disesuaikan (mis. DP yang barangnya sudah
+    // diambil otomatis jadi Piutang)
+    final items = await getOrderItems(id);
+    final totalHarga = _hitungTotalHarga(items);
+    final totalDibayar = (header?['total_dibayar'] as num?)?.toDouble() ?? 0;
+    final statusBayarBaru = hitungStatusPembayaran(totalDibayar, totalHarga, status);
+    await db.update('transaksi', {'status_pembayaran': statusBayarBaru}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Map<String, dynamic>>> getHistoriPembayaran(int transaksiId) async {
+    final db = await database;
+    return await db.query('pembayaran', where: 'transaksi_id = ?', whereArgs: [transaksiId], orderBy: 'tanggal DESC, id DESC');
+  }
+
+  // Mencatat pembayaran BARU dari pelanggan: masuk ke histori `pembayaran`
+  // (tidak pernah dihapus), menambah saldo kas sesuai jenis kas yang dipilih
+  // (HANYA nominal pembayaran aktual ini, bukan total transaksi), lalu
+  // memperbarui total_dibayar & status_pembayaran transaksi tsb.
+  Future<Map<String, dynamic>> tambahPembayaran({
+    required int transaksiId,
+    required double nominal,
+    required String tanggal,
+    String catatan = '',
+    required String kasJenis, // 'kas' | 'vapor' | 'alat'
+  }) async {
+    final db = await database;
+    final header = await getOrderHeader(transaksiId);
+    if (header == null) throw Exception('Transaksi tidak ditemukan');
+
+    await db.insert('pembayaran', {
+      'transaksi_id': transaksiId,
+      'nominal': nominal,
+      'tanggal': tanggal,
+      'catatan': catatan,
+      'kas_jenis': kasJenis,
+    });
+
+    final saldoSekarang = await getSaldoTerakhir();
+    final saldoBaru = (saldoSekarang[kasJenis] ?? 0) + nominal;
+    final noTrx = header['no_transaksi'] ?? '-';
+    final dataKas = <String, dynamic>{
+      'tanggal': tanggal,
+      'catatan': catatan.isNotEmpty ? catatan : 'Pembayaran $noTrx',
+    };
+    if (kasJenis == 'kas') { dataKas['pemasukan_kas'] = nominal; dataKas['saldo_kas'] = saldoBaru; }
+    else if (kasJenis == 'vapor') { dataKas['pemasukan_vapor'] = nominal; dataKas['saldo_kas_vapor'] = saldoBaru; }
+    else { dataKas['pemasukan_alat'] = nominal; dataKas['saldo_kas_alat'] = saldoBaru; }
+    await db.insert('kas_keluar', dataKas);
+
+    final items = await getOrderItems(transaksiId);
+    final totalHarga = _hitungTotalHarga(items);
+    final totalDibayarBaru = ((header['total_dibayar'] as num?)?.toDouble() ?? 0) + nominal;
+    final statusPengambilan = (header['status_pengambilan'] as String?) ?? 'belum_diambil';
+    final statusBaru = hitungStatusPembayaran(totalDibayarBaru, totalHarga, statusPengambilan);
+
+    await db.update('transaksi', {
+      'total_dibayar': totalDibayarBaru,
+      'status_pembayaran': statusBaru,
+    }, where: 'id = ?', whereArgs: [transaksiId]);
+
+    return {'total_dibayar': totalDibayarBaru, 'status_pembayaran': statusBaru};
+  }
+
+  Future<Map<String, dynamic>?> getTransaksiDetail(int id) async {
+    final header = await getOrderHeader(id);
+    if (header == null) return null;
+    final items = await getOrderItems(id);
+    final pembayaranList = await getHistoriPembayaran(id);
+    return {...header, 'items': items, 'pembayaran': pembayaranList, 'total_harga': _hitungTotalHarga(items)};
   }
 
   // ---------- KAS ----------
