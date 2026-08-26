@@ -44,7 +44,7 @@ class DatabaseHelper {
   // Versi skema saat ini. Naikkan angka ini setiap kali menambah migrasi baru
   // di dalam _migrasi() agar migrasi lama otomatis di-skip pada app yang sudah
   // pernah dibuka sebelumnya.
-  static const int _dbVersion = 2;
+  static const int _dbVersion = 5;
 
   Future<void> _migrasi(Database db) async {
     // Skip seluruh proses migrasi kalau versi skema sudah paling baru.
@@ -120,6 +120,56 @@ class DatabaseHelper {
       }
     }
 
+    // v3: tambah Qty & Harga Satuan per barang di order_items.
+    // PENTING: kolom 'harga' TIDAK diubah maknanya — tetap berisi SUBTOTAL
+    // per item (qty x harga_satuan), persis seperti sebelumnya. Ini supaya
+    // semua query SUM(harga) yang sudah ada (dashboard, laporan, riwayat
+    // transaksi, grafik omset) tetap benar tanpa perlu diubah sama sekali.
+    final kolomItem = await db.rawQuery("PRAGMA table_info(order_items)");
+    final namaKolomItem = kolomItem.map((k) => k['name']).toSet();
+
+    if (!namaKolomItem.contains('qty')) {
+      await db.execute("ALTER TABLE order_items ADD COLUMN qty REAL DEFAULT 1");
+    }
+    if (!namaKolomItem.contains('harga_satuan')) {
+      await db.execute("ALTER TABLE order_items ADD COLUMN harga_satuan REAL");
+      // Backfill data lama: qty dianggap 1, jadi harga_satuan = harga (subtotal lama).
+      await db.execute("UPDATE order_items SET harga_satuan = harga WHERE harga_satuan IS NULL");
+    }
+
+    // v4: 'harga_bahan' TERNYATA berisi catatan pembelian material/bahan habis
+    // pakai (bubuk cat, remover, gas, dll), BUKAN katalog nama barang/part
+    // motor yang dikerjakan. Itu sebabnya autocomplete di form Tambah Barang
+    // salah menyarankan data pembelian bahan. Dibuat tabel BARU khusus katalog
+    // barang/part motor, terpisah total dari harga_bahan (yang tidak disentuh
+    // sama sekali, tetap ada untuk kebutuhan lain di masa depan).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS katalog_barang (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nama_barang TEXT NOT NULL UNIQUE,
+        harga_terakhir REAL,
+        kategori TEXT,
+        satuan TEXT,
+        aktif INTEGER DEFAULT 1
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_katalog_barang_nama ON katalog_barang(nama_barang)');
+
+    final adaKatalog = await db.rawQuery("SELECT COUNT(*) as c FROM katalog_barang");
+    if ((adaKatalog.first['c'] as int) == 0) {
+      const daftarAwal = [
+        'Kop', 'Bak Kopling', 'Cover Kopling', 'Kopling',
+        'Bak Kanan', 'Bak Kiri', 'Bak Kanan Kiri',
+        'Blok', 'Blok Kop', 'Head', 'Kalter', 'Kalter Set', 'Kalter Blokop',
+        'Timing', 'Gear', 'Dinamo', 'CDI', 'Manifold', 'Karbu',
+        'Tromol Depan', 'Tromol Belakang', 'Krengkes', 'Footstep', 'Velg',
+        'Kaliper', 'Piston', 'Sokbreker', 'Rantai Keteng', 'Pangkon Mesin',
+      ];
+      for (final nm in daftarAwal) {
+        await db.insert('katalog_barang', {'nama_barang': nm}, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+    }
+
     for (final t in ['master_motor', 'master_warna_cat', 'master_warna_lis', 'master_proses']) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS $t (
@@ -133,6 +183,47 @@ class DatabaseHelper {
     await _seedMasterData(db, 'master_warna_cat', ['Hitam Glossy', 'Gun Metal Glossy', 'Bronze Metalik Glossy', 'Hitam Textur']);
     await _seedMasterData(db, 'master_warna_lis', ['Merah', 'Biru', 'Kuning', 'Hijau', 'Putih', 'Pink', 'Ungu', 'Emas', 'Silver', 'Hitam']);
     await _seedMasterData(db, 'master_proses', ['PowderCoating & Vaporblasting', 'Powder Coating', 'Vaporblasting', 'Sandblasting', 'Remove Chrome, PowderCoating, Vaporblasting']);
+
+    // v5: bersihkan data master. Data lama (hasil import Excel) punya banyak
+    // variasi Type Motor / Warna Cat / Warna Lis akibat spasi berlebih (mis.
+    // 'Tiger' vs 'Tiger '), padahal daftar master hanya diisi beberapa nilai
+    // contoh saat pertama kali dibuat. Akibatnya banyak motor/warna asli TIDAK
+    // BISA dipilih di dropdown form order. Langkah ini:
+    //  1) Merapikan spasi berlebih pada data transaksi lama (isi/nilai TIDAK
+    //     diubah, cuma spasi di awal/akhir dihapus — harga, nama pelanggan,
+    //     dan seluruh data keuangan sama sekali tidak disentuh).
+    //  2) Menambahkan SEMUA varian motor/warna yang pernah benar-benar dipakai
+    //     di transaksi ke dalam daftar master, supaya bisa dipilih lagi.
+    //     Duplikat yang beda kapitalisasi doang (mis. 'MP' vs 'Mp') tidak
+    //     digandakan. Sisa variasi yang mirip (mis. 'GL' vs 'GL 100' vs 'GL
+    //     Neotech') sengaja TIDAK ditebak/digabung otomatis oleh sistem —
+    //     silakan digabungkan manual lewat menu Kelola di halaman Lainnya
+    //     kalau memang dianggap sama, karena pemilik usaha yang paling tahu.
+    for (final kolom in ['motor', 'warna_cat', 'warna_lis', 'asal']) {
+      await db.rawUpdate('''
+        UPDATE transaksi SET $kolom = TRIM($kolom)
+        WHERE $kolom IS NOT NULL AND $kolom != TRIM($kolom)
+      ''');
+    }
+
+    Future<void> gabungkanKeMaster(String table, String kolomTransaksi) async {
+      final sudahAda = (await db.query(table)).map((r) => (r['nama'] as String).trim().toLowerCase()).toSet();
+      final nilaiAsli = await db.rawQuery('''
+        SELECT DISTINCT TRIM($kolomTransaksi) as v FROM transaksi
+        WHERE $kolomTransaksi IS NOT NULL AND TRIM($kolomTransaksi) != ''
+      ''');
+      for (final row in nilaiAsli) {
+        final v = row['v'] as String;
+        if (!sudahAda.contains(v.toLowerCase())) {
+          await db.insert(table, {'nama': v});
+          sudahAda.add(v.toLowerCase());
+        }
+      }
+    }
+
+    await gabungkanKeMaster('master_motor', 'motor');
+    await gabungkanKeMaster('master_warna_cat', 'warna_cat');
+    await gabungkanKeMaster('master_warna_lis', 'warna_lis');
 
     // Index untuk mempercepat query yang sebelumnya melakukan full table scan
     // (dashboard, daftar transaksi, autocomplete barang).
@@ -346,11 +437,37 @@ class DatabaseHelper {
 
   // ---------- HARGA BAHAN (autocomplete barang/part) ----------
 
+  // ---------- KATALOG BARANG (autocomplete barang/part yang dikerjakan) ----------
+  // Terpisah dari harga_bahan (itu catatan pembelian material, bukan katalog part).
+
   Future<List<Map<String, dynamic>>> cariBarang(String q) async {
     final db = await database;
     if (q.isEmpty) return [];
-    return await db.query('harga_bahan', where: 'nama_barang LIKE ?', whereArgs: ['%$q%'], limit: 8);
+    return await db.query(
+      'katalog_barang',
+      where: 'nama_barang LIKE ? AND aktif = 1',
+      whereArgs: ['%$q%'],
+      orderBy: 'nama_barang ASC',
+      limit: 8,
+    );
   }
+
+  // Dipanggil setiap kali barang disimpan ke sebuah order: kalau nama belum
+  // ada di katalog, ditambahkan; kalau sudah ada, harga_terakhir diperbarui
+  // supaya saran harga di transaksi berikutnya selalu yang paling baru.
+  Future<void> insertOrUpdateKatalogBarang(String nama, double harga) async {
+    final db = await database;
+    final existing = await db.query('katalog_barang', where: 'nama_barang = ? COLLATE NOCASE', whereArgs: [nama]);
+    if (existing.isEmpty) {
+      await db.insert('katalog_barang', {'nama_barang': nama, 'harga_terakhir': harga});
+    } else {
+      await db.update('katalog_barang', {'harga_terakhir': harga}, where: 'id = ?', whereArgs: [existing.first['id']]);
+    }
+  }
+
+  // ---------- HARGA BAHAN (catatan pembelian material/bahan habis pakai) ----------
+  // CATATAN: tabel ini TIDAK dipakai untuk autocomplete barang/part order lagi
+  // (lihat katalog_barang di atas). Dibiarkan apa adanya untuk kebutuhan lain.
 
   Future<int> insertHargaBahan(String nama, double harga) async {
     final db = await database;

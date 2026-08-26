@@ -183,10 +183,17 @@ class _OrderFormPageState extends State<OrderFormPage> {
           ...items.asMap().entries.map((e) {
             final i = e.key;
             final it = e.value;
+            final qty = (it['qty'] as num?)?.toDouble() ?? 1;
+            final qtyLabel = qty == qty.roundToDouble() ? qty.toInt().toString() : qty.toString();
+            final satuan = (it['harga_satuan'] as num?)?.toDouble() ?? (it['harga'] as num?)?.toDouble() ?? 0;
             return Card(
               child: ListTile(
                 title: Text(it['barang'] ?? '-', style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text('${it['warna_cat'] ?? '-'}${it['warna_lis'] != null && it['warna_lis'] != '' ? ' • Lis ${it['warna_lis']}' : ''}'),
+                subtitle: Text(
+                  '$qtyLabel pcs × ${formatRupiah(satuan)}'
+                  '${it['warna_cat'] != null && it['warna_cat'] != '' ? ' • ${it['warna_cat']}' : ''}'
+                  '${it['warna_lis'] != null && it['warna_lis'] != '' ? ' • Lis ${it['warna_lis']}' : ''}',
+                ),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text(formatRupiah(it['harga']), style: const TextStyle(fontWeight: FontWeight.bold)),
                   IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _tambahBarang(existing: it, index: i)),
@@ -303,11 +310,12 @@ class _TambahBarangSheet extends StatefulWidget {
 class _TambahBarangSheetState extends State<_TambahBarangSheet> {
   final _barang = TextEditingController();
   final _kode = TextEditingController();
-  final _hargaManual = TextEditingController();
+  final _hargaManual = TextEditingController(); // harga satuan
+  final _qty = TextEditingController(text: '1');
   String? warnaCat;
   String? warnaLis;
   bool pakaiHargaManual = false;
-  double? hargaDariDaftar;
+  double? hargaDariDaftar; // harga satuan dari daftar/riwayat
   List<Map<String, dynamic>> saran = [];
   List<Map<String, dynamic>> masterWarnaCat = [];
   List<Map<String, dynamic>> masterWarnaLis = [];
@@ -322,10 +330,17 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
       _kode.text = widget.existing!['kode'] ?? '';
       warnaCat = widget.existing!['warna_cat'];
       warnaLis = widget.existing!['warna_lis'];
-      _hargaManual.text = formatRupiah(widget.existing!['harga'], withRp: false);
+      final qtyLama = (widget.existing!['qty'] as num?)?.toDouble() ?? 1;
+      _qty.text = qtyLama == qtyLama.roundToDouble() ? qtyLama.toInt().toString() : qtyLama.toString();
+      final satuanLama = (widget.existing!['harga_satuan'] as num?)?.toDouble() ?? (widget.existing!['harga'] as num?)?.toDouble();
+      _hargaManual.text = formatRupiah(satuanLama, withRp: false);
       pakaiHargaManual = true;
     }
   }
+
+  double get _qtyValue => double.tryParse(_qty.text.replaceAll(',', '.')) ?? 0;
+  double get _hargaSatuanAktif => pakaiHargaManual ? parseRupiah(_hargaManual.text) : (hargaDariDaftar ?? 0);
+  double get _subtotal => _qtyValue * _hargaSatuanAktif;
 
   Future<void> _loadMaster() async {
     masterWarnaCat = await DatabaseHelper.instance.getMaster('master_warna_cat');
@@ -357,37 +372,37 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
   void _pilihSaran(Map<String, dynamic> s) {
     setState(() {
       _barang.text = s['nama_barang'];
-      hargaDariDaftar = (s['harga'] as num?)?.toDouble();
-      pakaiHargaManual = false;
+      hargaDariDaftar = (s['harga_terakhir'] as num?)?.toDouble();
+      pakaiHargaManual = hargaDariDaftar == null;
       saran = [];
     });
   }
 
   Future<void> _simpan() async {
-    if (_barang.text.trim().isEmpty || warnaCat == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nama barang dan warna wajib diisi')));
+    if (_barang.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nama barang wajib diisi')));
       return;
     }
-    double harga;
-    if (pakaiHargaManual) {
-      harga = parseRupiah(_hargaManual.text);
-    } else {
-      harga = hargaDariDaftar ?? 0;
-    }
-    if (harga <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi harga terlebih dahulu')));
+    if (_qtyValue <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Qty harus lebih dari 0')));
       return;
     }
-    // Kalau barang baru (belum ada di database harga), simpan sebagai referensi ke depan
-    if (hargaDariDaftar == null) {
-      await DatabaseHelper.instance.insertHargaBahan(_barang.text.trim(), harga);
+    final hargaSatuan = _hargaSatuanAktif;
+    if (hargaSatuan <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi harga satuan terlebih dahulu')));
+      return;
     }
+    // Simpan/perbarui katalog barang supaya harga_terakhir selalu yang terbaru,
+    // baik barang baru maupun barang lama yang harganya baru saja diubah.
+    await DatabaseHelper.instance.insertOrUpdateKatalogBarang(_barang.text.trim(), hargaSatuan);
     Navigator.pop(context, {
       'barang': _barang.text.trim(),
       'kode': _kode.text.trim(),
       'warna_cat': warnaCat,
       'warna_lis': warnaLis,
-      'harga': harga,
+      'qty': _qtyValue,
+      'harga_satuan': hargaSatuan,
+      'harga': _subtotal, // subtotal = qty x harga satuan
     });
   }
 
@@ -414,7 +429,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
                 children: saran.map((s) => ListTile(
                   dense: true,
                   title: Text(s['nama_barang']),
-                  trailing: Text(formatRupiah(s['harga'])),
+                  trailing: Text(s['harga_terakhir'] != null ? formatRupiah(s['harga_terakhir']) : '-'),
                   onTap: () => _pilihSaran(s),
                 )).toList(),
               ),
@@ -424,7 +439,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: warnaCat,
-            decoration: const InputDecoration(labelText: 'Warna Cat', border: OutlineInputBorder()),
+            decoration: const InputDecoration(labelText: 'Warna Cat (opsional, kosongkan jika Vapor saja)', border: OutlineInputBorder()),
             items: masterWarnaCat.map((m) => DropdownMenuItem<String>(value: m['nama'] as String, child: Text(m['nama']))).toList(),
             onChanged: (v) => setState(() => warnaCat = v),
           ),
@@ -436,20 +451,42 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
             onChanged: (v) => setState(() => warnaLis = v),
           ),
           const SizedBox(height: 12),
+          TextField(
+            controller: _qty,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(labelText: 'Qty', border: OutlineInputBorder(), suffixText: 'pcs'),
+          ),
+          const SizedBox(height: 12),
           RadioListTile<bool>(
             value: false,
             groupValue: pakaiHargaManual,
-            title: Text('Gunakan harga dari daftar${hargaDariDaftar != null ? ' (${formatRupiah(hargaDariDaftar)})' : ''}'),
+            title: Text('Harga satuan dari daftar${hargaDariDaftar != null ? ' (${formatRupiah(hargaDariDaftar)})' : ''}'),
             onChanged: hargaDariDaftar == null ? null : (v) => setState(() => pakaiHargaManual = v!),
           ),
           RadioListTile<bool>(
             value: true,
             groupValue: pakaiHargaManual,
-            title: const Text('Isi harga manual'),
+            title: const Text('Isi harga satuan manual'),
             onChanged: (v) => setState(() => pakaiHargaManual = v!),
           ),
           if (pakaiHargaManual)
-            TextField(controller: _hargaManual, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'Harga', border: OutlineInputBorder())),
+            TextField(
+              controller: _hargaManual,
+              keyboardType: TextInputType.number,
+              inputFormatters: [RupiahInputFormatter()],
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(labelText: 'Harga Satuan', border: OutlineInputBorder()),
+            ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppColors.biruTerang.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Subtotal', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(formatRupiah(_subtotal), style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.biruTua, fontSize: 16)),
+            ]),
+          ),
           const SizedBox(height: 16),
           FilledButton(onPressed: _simpan, style: FilledButton.styleFrom(backgroundColor: AppColors.biruTua, minimumSize: const Size(double.infinity, 48)), child: const Text('Simpan Barang')),
           const SizedBox(height: 16),
