@@ -28,6 +28,14 @@ class _TransaksiPageState extends State<TransaksiPage> {
   List<Map<String, dynamic>> masterMotor = [];
   List<Map<String, dynamic>> masterProses = [];
 
+  // Bulan/Tahun yang tersedia HANYA dari periode yang benar-benar ada
+  // transaksinya di database (bukan daftar tetap 12 bulan / 6 tahun lagi).
+  // Diberi nilai awal non-kosong (bulan/tahun sekarang) supaya build PERTAMA
+  // sebelum data async selesai dimuat tidak menampilkan dropdown kosong.
+  List<int> tahunTersedia = [DateTime.now().year];
+  List<int> bulanTersedia = [DateTime.now().month];
+  bool periodeSiap = false;
+
   bool get adaFilterAktif =>
       filterStatusPengerjaan != null || filterStatusPengambilan != null || filterStatusPembayaran != null ||
       filterMotor != null || filterProses != null || filterTanggal != null;
@@ -37,8 +45,48 @@ class _TransaksiPageState extends State<TransaksiPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _initPeriodeDanLoad();
     _loadMaster();
+  }
+
+  // Menentukan bulan/tahun default berdasarkan data yang benar-benar ada:
+  // - Kalau database masih kosong, tetap pakai bulan/tahun sekarang supaya
+  //   halaman tidak error dan user tetap bisa lihat form kosong.
+  // - Kalau ada data tapi bulan/tahun sekarang tidak ada transaksinya,
+  //   otomatis pindah ke periode TERBARU yang punya data.
+  Future<void> _initPeriodeDanLoad() async {
+    final tahunList = await DatabaseHelper.instance.getTahunTransaksiTersedia();
+    if (tahunList.isEmpty) {
+      tahunTersedia = [tahun];
+      bulanTersedia = [bulan];
+      periodeSiap = true;
+      if (mounted) setState(() {});
+      _load();
+      return;
+    }
+
+    tahunTersedia = tahunList;
+    if (!tahunTersedia.contains(tahun)) tahun = tahunTersedia.first;
+
+    final bulanList = await DatabaseHelper.instance.getBulanTransaksiTersedia(tahun);
+    bulanTersedia = bulanList.isEmpty ? [bulan] : bulanList;
+    if (!bulanTersedia.contains(bulan)) bulan = bulanTersedia.first;
+
+    periodeSiap = true;
+    if (mounted) setState(() {});
+    _load();
+  }
+
+  // Dipanggil setiap kali user ganti Tahun di dropdown: daftar bulan yang
+  // muncul harus disesuaikan lagi dengan tahun yang baru dipilih.
+  Future<void> _gantiTahun(int tahunBaru) async {
+    setState(() => tahun = tahunBaru);
+    final bulanList = await DatabaseHelper.instance.getBulanTransaksiTersedia(tahunBaru);
+    setState(() {
+      bulanTersedia = bulanList.isEmpty ? [DateTime.now().month] : bulanList;
+      if (!bulanTersedia.contains(bulan)) bulan = bulanTersedia.first;
+    });
+    _load();
   }
 
   Future<void> _loadMaster() async {
@@ -235,9 +283,8 @@ class _TransaksiPageState extends State<TransaksiPage> {
 
   @override
   Widget build(BuildContext context) {
-    final tahunList = List.generate(6, (i) => DateTime.now().year - 3 + i);
     return Scaffold(
-      appBar: AppBar(title: const Text('Transaksi'), actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)]),
+      appBar: AppBar(title: const Text('Transaksi'), actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _initPeriodeDanLoad)]),
       body: Column(
         children: [
           Padding(
@@ -246,19 +293,21 @@ class _TransaksiPageState extends State<TransaksiPage> {
               Row(children: [
                 Expanded(
                   child: DropdownButtonFormField<int>(
+                    key: ValueKey('bulan-${bulanTersedia.join(",")}-$bulan'),
                     initialValue: bulan,
                     decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                    items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(bulanNama[i + 1]))),
-                    onChanged: filterTanggal != null ? null : (v) { setState(() => bulan = v!); _load(); },
+                    items: (List<int>.from(bulanTersedia)..sort()).map((b) => DropdownMenuItem(value: b, child: Text(bulanNama[b]))).toList(),
+                    onChanged: (filterTanggal != null || !periodeSiap) ? null : (v) { setState(() => bulan = v!); _load(); },
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<int>(
+                    key: ValueKey('tahun-${tahunTersedia.join(",")}-$tahun'),
                     initialValue: tahun,
                     decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                    items: tahunList.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
-                    onChanged: filterTanggal != null ? null : (v) { setState(() => tahun = v!); _load(); },
+                    items: tahunTersedia.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
+                    onChanged: (filterTanggal != null || !periodeSiap) ? null : (v) => _gantiTahun(v!),
                   ),
                 ),
               ]),

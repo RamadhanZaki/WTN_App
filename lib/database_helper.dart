@@ -706,6 +706,29 @@ class DatabaseHelper {
     return (awal, akhir);
   }
 
+  // Dipakai halaman Transaksi supaya dropdown filter Bulan/Tahun HANYA
+  // menampilkan periode yang benar-benar ada transaksinya di database
+  // (bukan daftar 12 bulan/rentang tahun tetap seperti sebelumnya).
+  Future<List<int>> getTahunTransaksiTersedia() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT substr(tanggal, 1, 4) as th FROM transaksi
+      WHERE tanggal IS NOT NULL AND tanggal != ''
+      ORDER BY th DESC
+    ''');
+    return rows.map((r) => int.parse(r['th'] as String)).toList();
+  }
+
+  Future<List<int>> getBulanTransaksiTersedia(int tahun) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT substr(tanggal, 6, 2) as bl FROM transaksi
+      WHERE substr(tanggal, 1, 4) = ?
+      ORDER BY bl DESC
+    ''', ['$tahun']);
+    return rows.map((r) => int.parse(r['bl'] as String)).toList();
+  }
+
   Future<List<Map<String, dynamic>>> getTransaksiByBulan(int bulan, int tahun, {String search = ''}) async {
     final db = await database;
     final (awal, akhir) = _rentangBulan(bulan, tahun);
@@ -1176,6 +1199,32 @@ class DatabaseHelper {
       'vapor': await ambil('saldo_kas_vapor'),
       'alat': await ambil('saldo_kas_alat'),
     };
+  }
+
+  // Dipakai halaman Pengeluaran supaya dialog "Pilih Bulan & Tahun" HANYA
+  // menampilkan periode yang benar-benar ada baris PENGELUARAN-nya (bukan
+  // baris pemasukan/penyesuaian/reset saldo yang juga tersimpan di tabel
+  // kas_keluar yang sama).
+  Future<List<int>> getTahunPengeluaranTersedia() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT substr(tanggal, 1, 4) as th FROM kas_keluar
+      WHERE tanggal IS NOT NULL AND tanggal != ''
+        AND (pengeluaran_kas IS NOT NULL OR pengeluaran_vapor IS NOT NULL OR pengeluaran_alat IS NOT NULL)
+      ORDER BY th DESC
+    ''');
+    return rows.map((r) => int.parse(r['th'] as String)).toList();
+  }
+
+  Future<List<int>> getBulanPengeluaranTersedia(int tahun) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT substr(tanggal, 6, 2) as bl FROM kas_keluar
+      WHERE substr(tanggal, 1, 4) = ?
+        AND (pengeluaran_kas IS NOT NULL OR pengeluaran_vapor IS NOT NULL OR pengeluaran_alat IS NOT NULL)
+      ORDER BY bl DESC
+    ''', ['$tahun']);
+    return rows.map((r) => int.parse(r['bl'] as String)).toList();
   }
 
   Future<void> insertPengeluaran({required String jenis, required double nominal, required String catatan, required String tanggal}) async {

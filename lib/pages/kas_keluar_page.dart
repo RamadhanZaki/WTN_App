@@ -24,13 +24,18 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
   String? jenisKasFilter; // null = semua
   DateTimeRange? tanggalFilter; // kalau diisi, menggantikan bulan/tahun
 
+  // Bulan/Tahun yang tersedia HANYA dari periode yang benar-benar ada
+  // baris pengeluarannya di database (bukan daftar tetap 12 bulan/6 tahun).
+  List<int> tahunPengeluaranTersedia = [DateTime.now().year];
+  List<int> bulanPengeluaranTersedia = [DateTime.now().month];
+
   final bulanNama = const ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
   @override
   void initState() {
     super.initState();
     _load();
-    _loadRiwayat();
+    _initFilterRiwayat();
   }
 
   Future<void> _load() async {
@@ -40,6 +45,28 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
       saldo = s;
       loading = false;
     });
+  }
+
+  // Menentukan bulan/tahun default riwayat berdasarkan data yang benar-benar
+  // ada (sama seperti halaman Transaksi): kalau belum ada pengeluaran sama
+  // sekali, tetap pakai bulan/tahun sekarang; kalau ada tapi periode
+  // sekarang kosong, pindah otomatis ke periode terbaru yang ada datanya.
+  Future<void> _initFilterRiwayat() async {
+    final tahunList = await DatabaseHelper.instance.getTahunPengeluaranTersedia();
+    if (tahunList.isEmpty) {
+      await _loadRiwayat();
+      return;
+    }
+
+    tahunPengeluaranTersedia = tahunList;
+    if (!tahunPengeluaranTersedia.contains(tahunFilter)) tahunFilter = tahunPengeluaranTersedia.first;
+
+    final bulanList = await DatabaseHelper.instance.getBulanPengeluaranTersedia(tahunFilter);
+    bulanPengeluaranTersedia = bulanList.isEmpty ? [bulanFilter] : bulanList;
+    if (!bulanPengeluaranTersedia.contains(bulanFilter)) bulanFilter = bulanPengeluaranTersedia.first;
+
+    if (mounted) setState(() {});
+    await _loadRiwayat();
   }
 
   Future<void> _loadRiwayat() async {
@@ -85,7 +112,7 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
   Future<void> _pilihBulanFilter() async {
     int tempBulan = bulanFilter;
     int tempTahun = tahunFilter;
-    final tahunList = List.generate(6, (i) => DateTime.now().year - 3 + i);
+    List<int> tempBulanTersedia = List<int>.from(bulanPengeluaranTersedia);
 
     final hasil = await showDialog<Map<String, int>>(
       context: context,
@@ -95,19 +122,28 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
           content: Row(children: [
             Expanded(
               child: DropdownButtonFormField<int>(
+                key: ValueKey('dlgbulan-${tempBulanTersedia.join(",")}-$tempBulan'),
                 initialValue: tempBulan,
                 decoration: const InputDecoration(labelText: 'Bulan', isDense: true),
-                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(bulanNama[i + 1]))),
+                items: (List<int>.from(tempBulanTersedia)..sort()).map((b) => DropdownMenuItem(value: b, child: Text(bulanNama[b]))).toList(),
                 onChanged: (v) => setDialogState(() => tempBulan = v!),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<int>(
+                key: ValueKey('dlgtahun-${tahunPengeluaranTersedia.join(",")}-$tempTahun'),
                 initialValue: tempTahun,
                 decoration: const InputDecoration(labelText: 'Tahun', isDense: true),
-                items: tahunList.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
-                onChanged: (v) => setDialogState(() => tempTahun = v!),
+                items: tahunPengeluaranTersedia.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
+                onChanged: (v) async {
+                  setDialogState(() => tempTahun = v!);
+                  final bl = await DatabaseHelper.instance.getBulanPengeluaranTersedia(v!);
+                  setDialogState(() {
+                    tempBulanTersedia = bl.isEmpty ? [tempBulan] : bl;
+                    if (!tempBulanTersedia.contains(tempBulan)) tempBulan = tempBulanTersedia.first;
+                  });
+                },
               ),
             ),
           ]),
@@ -332,12 +368,12 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
     _nominal.clear();
     _catatan.clear();
     await _load();
-    // Refresh riwayat hanya kalau pengeluaran baru masuk ke bulan & tahun
-    // yang sedang difilter, supaya tidak melakukan query yang tidak perlu.
-    final sekarang = DateTime.now();
-    if (bulanFilter == sekarang.month && tahunFilter == sekarang.year) {
-      await _loadRiwayat();
-    }
+    // Refresh daftar bulan/tahun yang tersedia (siapa tahu ini pengeluaran
+    // pertama di bulan berjalan, jadi perlu muncul di pilihan filter).
+    // _initFilterRiwayat mempertahankan bulan/tahun yang sedang dilihat user
+    // selama masih valid, dan hanya pindah ke periode terbaru kalau filter
+    // lama sudah tidak ada datanya sama sekali.
+    await _initFilterRiwayat();
     setState(() => saving = false);
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pengeluaran tersimpan')));
   }
