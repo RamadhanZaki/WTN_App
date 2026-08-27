@@ -55,9 +55,39 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _pilihPeriodeRingkasan() async {
-    int tempBulan = bulanRingkasan;
-    int tempTahun = tahunRingkasan;
-    final tahunList = List.generate(6, (i) => DateTime.now().year - 3 + i);
+    // Ambil daftar 'YYYY-MM' yang benar-benar punya transaksi di database,
+    // supaya dropdown Bulan & Tahun cuma menampilkan pilihan yang ada
+    // datanya saja (tidak ada lagi bulan/tahun kosong di daftar).
+    final tersedia = await DatabaseHelper.instance.getBulanTahunTersedia();
+
+    if (tersedia.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Belum ada data transaksi untuk dipilih')),
+        );
+      }
+      return;
+    }
+
+    // Susun jadi map: tahun -> daftar bulan (1-12) yang ada datanya di tahun itu.
+    final Map<int, List<int>> tahunKeBulan = {};
+    for (final ym in tersedia) {
+      final parts = ym.split('-');
+      if (parts.length != 2) continue;
+      final t = int.tryParse(parts[0]);
+      final b = int.tryParse(parts[1]);
+      if (t == null || b == null) continue;
+      tahunKeBulan.putIfAbsent(t, () => []).add(b);
+    }
+    final tahunList = tahunKeBulan.keys.toList()..sort((a, b) => b.compareTo(a)); // terbaru dulu
+    for (final t in tahunKeBulan.keys) {
+      tahunKeBulan[t]!.sort();
+    }
+
+    // Kalau bulan/tahun ringkasan saat ini tidak ada datanya, mulai dari
+    // pilihan pertama yang tersedia (tahun & bulan terbaru yang ada data).
+    int tempTahun = tahunKeBulan.containsKey(tahunRingkasan) ? tahunRingkasan : tahunList.first;
+    int tempBulan = tahunKeBulan[tempTahun]!.contains(bulanRingkasan) ? bulanRingkasan : tahunKeBulan[tempTahun]!.last;
 
     final hasil = await showDialog<Map<String, int>>(
       context: context,
@@ -69,7 +99,9 @@ class _DashboardPageState extends State<DashboardPage> {
               child: DropdownButtonFormField<int>(
                 initialValue: tempBulan,
                 decoration: const InputDecoration(labelText: 'Bulan', isDense: true),
-                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(bulanNama[i + 1]))),
+                items: tahunKeBulan[tempTahun]!
+                    .map((b) => DropdownMenuItem(value: b, child: Text(bulanNama[b])))
+                    .toList(),
                 onChanged: (v) => setDialogState(() => tempBulan = v!),
               ),
             ),
@@ -79,7 +111,14 @@ class _DashboardPageState extends State<DashboardPage> {
                 initialValue: tempTahun,
                 decoration: const InputDecoration(labelText: 'Tahun', isDense: true),
                 items: tahunList.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
-                onChanged: (v) => setDialogState(() => tempTahun = v!),
+                onChanged: (v) => setDialogState(() {
+                  tempTahun = v!;
+                  // Kalau bulan yang lagi dipilih tidak ada di tahun baru,
+                  // otomatis pindah ke bulan terakhir yang ada datanya di tahun itu.
+                  if (!tahunKeBulan[tempTahun]!.contains(tempBulan)) {
+                    tempBulan = tahunKeBulan[tempTahun]!.last;
+                  }
+                }),
               ),
             ),
           ]),

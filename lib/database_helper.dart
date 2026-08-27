@@ -910,6 +910,21 @@ class DatabaseHelper {
     ''', [jumlahBulan]);
   }
 
+  // Daftar bulan & tahun yang BENAR-BENAR ada datanya di tabel transaksi,
+  // dipakai supaya dropdown "Pilih Bulan & Tahun" (dashboard) tidak
+  // menampilkan bulan/tahun kosong yang tidak ada transaksinya sama sekali.
+  // Dikembalikan urut terbaru dulu, format 'YYYY-MM'.
+  Future<List<String>> getBulanTahunTersedia() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT strftime('%Y-%m', tanggal) as bulan
+      FROM transaksi
+      WHERE tanggal IS NOT NULL
+      ORDER BY bulan DESC
+    ''');
+    return rows.map((r) => r['bulan'] as String).where((s) => s.isNotEmpty).toList();
+  }
+
   // ---------- HARGA BAHAN (autocomplete barang/part) ----------
 
   // ---------- KATALOG BARANG (autocomplete barang/part yang dikerjakan) ----------
