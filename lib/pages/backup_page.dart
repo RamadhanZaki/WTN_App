@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../backup_service.dart';
+import '../local_backup_service.dart';
 import '../database_helper.dart';
 import '../app_theme.dart';
 
@@ -145,6 +146,77 @@ class _BackupPageState extends State<BackupPage> {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(teks)));
   }
 
+  Future<void> _exportLokal() async {
+    setState(() => processing = true);
+    try {
+      await LocalBackupService.instance.exportViaShare();
+    } catch (e) {
+      _pesan('Export gagal: $e');
+    }
+    setState(() => processing = false);
+  }
+
+  Future<void> _importLokal() async {
+    final konfirmasi = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import Database'),
+        content: const Text(
+          'Semua data yang ada di HP saat ini akan digantikan sepenuhnya dengan isi file yang kamu pilih. Tindakan ini tidak bisa dibatalkan (walau ada backup otomatis sesaat sebelum import, sebagai jaga-jaga). Lanjutkan?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ya, Import'),
+          ),
+        ],
+      ),
+    );
+    if (konfirmasi != true) return;
+
+    setState(() => processing = true);
+    try {
+      await LocalBackupService.instance.importDariFile();
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'restore', status: 'berhasil', keterangan: 'Import dari file lokal');
+      _pesan('Import berhasil. Silakan tutup dan buka ulang aplikasi.');
+    } catch (e) {
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'restore', status: 'gagal', keterangan: 'Import dari file lokal: $e');
+      _pesan('Import gagal: $e');
+    }
+    setState(() => processing = false);
+  }
+
+  Future<void> _pulihkanSebelumImport() async {
+    final adaSafety = await LocalBackupService.instance.adaSafetyBackup();
+    if (!adaSafety) {
+      _pesan('Belum ada backup otomatis sebelum-import yang tersimpan');
+      return;
+    }
+    final konfirmasi = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Batalkan Import Terakhir'),
+        content: const Text('Database akan dikembalikan ke kondisi tepat sebelum import terakhir kamu lakukan. Lanjutkan?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ya, Kembalikan')),
+        ],
+      ),
+    );
+    if (konfirmasi != true) return;
+
+    setState(() => processing = true);
+    try {
+      await LocalBackupService.instance.pulihkanSebelumImport();
+      _pesan('Berhasil dikembalikan. Silakan tutup dan buka ulang aplikasi.');
+    } catch (e) {
+      _pesan('Gagal: $e');
+    }
+    setState(() => processing = false);
+  }
+
   String _formatWaktu(String iso) {
     final dt = DateTime.tryParse(iso);
     if (dt == null) return iso;
@@ -222,6 +294,39 @@ class _BackupPageState extends State<BackupPage> {
                 const SizedBox(height: 8),
                 Text(
                   'Database disimpan di folder "WTN Blasting Backup" pada Google Drive akun kamu.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 28),
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text('Backup & Restore Lokal (Tanpa Internet)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                const SizedBox(height: 4),
+                Text(
+                  'Simpan/pindahkan file database langsung, tanpa perlu login Google. Cocok untuk backup manual ke penyimpanan HP, kirim ke HP lain, atau pindah ke HP baru.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 14),
+                OutlinedButton.icon(
+                  onPressed: processing ? null : _exportLokal,
+                  icon: const Icon(Icons.save_alt),
+                  label: const Text('Export Database ke File'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: processing ? null : _importLokal,
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent)),
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Import Database dari File'),
+                ),
+                const SizedBox(height: 10),
+                TextButton.icon(
+                  onPressed: processing ? null : _pulihkanSebelumImport,
+                  icon: const Icon(Icons.undo, size: 18),
+                  label: const Text('Batalkan Import Terakhir'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Setiap kali Import dilakukan, database sebelumnya otomatis disimpan sesaat sebagai jaga-jaga (1 slot) — bisa dikembalikan lewat tombol "Batalkan Import Terakhir" di atas selama belum di-import lagi.',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
               ],

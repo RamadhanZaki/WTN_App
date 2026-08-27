@@ -66,8 +66,39 @@ class LocalBackupService {
       throw Exception('File yang dipilih bukan database yang valid');
     }
 
+    // Safety net: sebelum database saat ini ditimpa, simpan dulu salinannya
+    // (diam-diam, 1 slot tetap — bukan riwayat tak terbatas) supaya kalau
+    // ternyata salah pilih file, database sebelum import masih bisa
+    // dipulihkan lewat pemulihanSebelumImport().
     final tujuanPath = await _dbPath();
+    final fileSaatIni = File(tujuanPath);
+    if (await fileSaatIni.exists()) {
+      final dir = await getApplicationDocumentsDirectory();
+      await fileSaatIni.copy(p.join(dir.path, _namaSafetyBackup));
+    }
+
     await DatabaseHelper.instance.tutupDatabase();
     await sumberFile.copy(tujuanPath);
+  }
+
+  static const _namaSafetyBackup = 'wtn_blasting_sebelum_import.db';
+
+  Future<bool> adaSafetyBackup() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File(p.join(dir.path, _namaSafetyBackup)).exists();
+  }
+
+  // Mengembalikan database ke kondisi tepat SEBELUM import terakhir
+  // dilakukan (pakai salinan safety net di atas). Dipakai kalau user
+  // ternyata salah pilih file saat import.
+  Future<void> pulihkanSebelumImport() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final safetyFile = File(p.join(dir.path, _namaSafetyBackup));
+    if (!await safetyFile.exists()) {
+      throw Exception('Tidak ada backup otomatis sebelum-import yang tersimpan');
+    }
+    final tujuanPath = await _dbPath();
+    await DatabaseHelper.instance.tutupDatabase();
+    await safetyFile.copy(tujuanPath);
   }
 }
