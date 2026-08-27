@@ -2,7 +2,65 @@ import 'package:flutter/material.dart';
 import '../database_helper.dart';
 import '../app_theme.dart';
 
-enum _FilterCepat { hariIni, mingguIni, bulanIni, tahunIni, custom }
+enum _FilterCepat { tahunIni, custom }
+
+const _bulanNamaLaporan = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+/// Dialog pemilih Bulan & Tahun. Mengembalikan (bulan, tahun) sesuai pilihan,
+/// atau null jika dibatalkan. Rentang tahun disesuaikan dengan data pada database
+/// (default: dari 2020 s.d. tahun berjalan) supaya pilihan selalu relevan dengan isi database.
+Future<(int, int)?> _pilihBulanTahunDialog(BuildContext context, {int? bulanAwal, int? tahunAwal}) async {
+  final now = DateTime.now();
+  int bulan = bulanAwal ?? now.month;
+  int tahun = tahunAwal ?? now.year;
+  final tahunList = [for (int y = now.year; y >= 2020; y--) y];
+  if (!tahunList.contains(tahun)) tahunList.insert(0, tahun);
+
+  return showDialog<(int, int)>(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (ctx, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Pilih Bulan & Tahun'),
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(labelText: 'Bulan'),
+                    value: bulan,
+                    items: [
+                      for (int m = 1; m <= 12; m++)
+                        DropdownMenuItem(value: m, child: Text(_bulanNamaLaporan[m])),
+                    ],
+                    onChanged: (v) => setStateDialog(() => bulan = v ?? bulan),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(labelText: 'Tahun'),
+                    value: tahun,
+                    items: [
+                      for (final y in tahunList)
+                        DropdownMenuItem(value: y, child: Text('$y')),
+                    ],
+                    onChanged: (v) => setStateDialog(() => tahun = v ?? tahun),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, (bulan, tahun)), child: const Text('Pilih')),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
 
 class LaporanKeuanganPage extends StatefulWidget {
   const LaporanKeuanganPage({super.key});
@@ -11,31 +69,33 @@ class LaporanKeuanganPage extends StatefulWidget {
 }
 
 class _LaporanKeuanganPageState extends State<LaporanKeuanganPage> {
-  _FilterCepat filter = _FilterCepat.bulanIni;
-  DateTimeRange? customRange;
+  _FilterCepat filter = _FilterCepat.custom;
+  int? bulanTerpilih;
+  int? tahunTerpilih;
   Map<String, dynamic> data = {};
   bool loading = true;
 
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    bulanTerpilih = now.month;
+    tahunTerpilih = now.year;
     _load();
   }
 
   (DateTime, DateTime) _rentang() {
     final now = DateTime.now();
     switch (filter) {
-      case _FilterCepat.hariIni:
-        return (DateTime(now.year, now.month, now.day), DateTime(now.year, now.month, now.day));
-      case _FilterCepat.mingguIni:
-        final awalMinggu = now.subtract(Duration(days: now.weekday - 1));
-        return (DateTime(awalMinggu.year, awalMinggu.month, awalMinggu.day), now);
-      case _FilterCepat.bulanIni:
-        return (DateTime(now.year, now.month, 1), now);
       case _FilterCepat.tahunIni:
         return (DateTime(now.year, 1, 1), now);
       case _FilterCepat.custom:
-        return customRange != null ? (customRange!.start, customRange!.end) : (DateTime(now.year, now.month, 1), now);
+        final b = bulanTerpilih ?? now.month;
+        final t = tahunTerpilih ?? now.year;
+        // Rentang satu bulan penuh: dari tanggal 1 s.d. hari terakhir bulan tsb,
+        // konsisten dengan format tanggal 'yyyy-MM-dd' yang tersimpan di database.
+        final akhirBulan = DateTime(t, b + 1, 0);
+        return (DateTime(t, b, 1), akhirBulan);
     }
   }
 
@@ -46,19 +106,17 @@ class _LaporanKeuanganPageState extends State<LaporanKeuanganPage> {
     setState(() { data = d; loading = false; });
   }
 
-  Future<void> _pilihCustomRange() async {
-    final r = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDateRange: customRange);
-    if (r != null) {
-      setState(() { customRange = r; filter = _FilterCepat.custom; });
+  Future<void> _pilihBulanTahun() async {
+    final now = DateTime.now();
+    final hasil = await _pilihBulanTahunDialog(context, bulanAwal: bulanTerpilih ?? now.month, tahunAwal: tahunTerpilih ?? now.year);
+    if (hasil != null) {
+      setState(() { bulanTerpilih = hasil.$1; tahunTerpilih = hasil.$2; filter = _FilterCepat.custom; });
       _load();
     }
   }
 
   String _labelFilter(_FilterCepat f) {
     switch (f) {
-      case _FilterCepat.hariIni: return 'Hari Ini';
-      case _FilterCepat.mingguIni: return 'Minggu Ini';
-      case _FilterCepat.bulanIni: return 'Bulan Ini';
       case _FilterCepat.tahunIni: return 'Tahun Ini';
       case _FilterCepat.custom: return 'Custom';
     }
@@ -76,7 +134,7 @@ class _LaporanKeuanganPageState extends State<LaporanKeuanganPage> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   Wrap(spacing: 8, runSpacing: 8, children: [
-                    for (final f in [_FilterCepat.hariIni, _FilterCepat.mingguIni, _FilterCepat.bulanIni, _FilterCepat.tahunIni])
+                    for (final f in [_FilterCepat.tahunIni])
                       ChoiceChip(
                         label: Text(_labelFilter(f)),
                         selected: filter == f,
@@ -85,12 +143,12 @@ class _LaporanKeuanganPageState extends State<LaporanKeuanganPage> {
                         labelStyle: TextStyle(color: filter == f ? Colors.white : Colors.black87, fontSize: 12),
                       ),
                     ActionChip(
-                      label: Text(filter == _FilterCepat.custom && customRange != null
-                          ? '${customRange!.start.day}/${customRange!.start.month} - ${customRange!.end.day}/${customRange!.end.month}'
-                          : 'Custom Tanggal'),
-                      avatar: const Icon(Icons.date_range, size: 16),
+                      label: Text(filter == _FilterCepat.custom && bulanTerpilih != null && tahunTerpilih != null
+                          ? '${_bulanNamaLaporan[bulanTerpilih!]} $tahunTerpilih'
+                          : 'Pilih Bulan'),
+                      avatar: const Icon(Icons.calendar_month, size: 16),
                       backgroundColor: filter == _FilterCepat.custom ? AppColors.biruTua.withOpacity(0.15) : null,
-                      onPressed: _pilihCustomRange,
+                      onPressed: _pilihBulanTahun,
                     ),
                   ]),
                   const SizedBox(height: 20),
@@ -135,31 +193,31 @@ class LaporanTransaksiPage extends StatefulWidget {
 }
 
 class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
-  _FilterCepat filter = _FilterCepat.bulanIni;
-  DateTimeRange? customRange;
+  _FilterCepat filter = _FilterCepat.custom;
+  int? bulanTerpilih;
+  int? tahunTerpilih;
   Map<String, dynamic> data = {};
   bool loading = true;
 
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    bulanTerpilih = now.month;
+    tahunTerpilih = now.year;
     _load();
   }
 
   (DateTime, DateTime) _rentang() {
     final now = DateTime.now();
     switch (filter) {
-      case _FilterCepat.hariIni:
-        return (DateTime(now.year, now.month, now.day), DateTime(now.year, now.month, now.day));
-      case _FilterCepat.mingguIni:
-        final awalMinggu = now.subtract(Duration(days: now.weekday - 1));
-        return (DateTime(awalMinggu.year, awalMinggu.month, awalMinggu.day), now);
-      case _FilterCepat.bulanIni:
-        return (DateTime(now.year, now.month, 1), now);
       case _FilterCepat.tahunIni:
         return (DateTime(now.year, 1, 1), now);
       case _FilterCepat.custom:
-        return customRange != null ? (customRange!.start, customRange!.end) : (DateTime(now.year, now.month, 1), now);
+        final b = bulanTerpilih ?? now.month;
+        final t = tahunTerpilih ?? now.year;
+        final akhirBulan = DateTime(t, b + 1, 0);
+        return (DateTime(t, b, 1), akhirBulan);
     }
   }
 
@@ -170,19 +228,17 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
     setState(() { data = d; loading = false; });
   }
 
-  Future<void> _pilihCustomRange() async {
-    final r = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDateRange: customRange);
-    if (r != null) {
-      setState(() { customRange = r; filter = _FilterCepat.custom; });
+  Future<void> _pilihBulanTahun() async {
+    final now = DateTime.now();
+    final hasil = await _pilihBulanTahunDialog(context, bulanAwal: bulanTerpilih ?? now.month, tahunAwal: tahunTerpilih ?? now.year);
+    if (hasil != null) {
+      setState(() { bulanTerpilih = hasil.$1; tahunTerpilih = hasil.$2; filter = _FilterCepat.custom; });
       _load();
     }
   }
 
   String _labelFilter(_FilterCepat f) {
     switch (f) {
-      case _FilterCepat.hariIni: return 'Hari Ini';
-      case _FilterCepat.mingguIni: return 'Minggu Ini';
-      case _FilterCepat.bulanIni: return 'Bulan Ini';
       case _FilterCepat.tahunIni: return 'Tahun Ini';
       case _FilterCepat.custom: return 'Custom';
     }
@@ -200,7 +256,7 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   Wrap(spacing: 8, runSpacing: 8, children: [
-                    for (final f in [_FilterCepat.hariIni, _FilterCepat.mingguIni, _FilterCepat.bulanIni, _FilterCepat.tahunIni])
+                    for (final f in [_FilterCepat.tahunIni])
                       ChoiceChip(
                         label: Text(_labelFilter(f)),
                         selected: filter == f,
@@ -209,12 +265,12 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
                         labelStyle: TextStyle(color: filter == f ? Colors.white : Colors.black87, fontSize: 12),
                       ),
                     ActionChip(
-                      label: Text(filter == _FilterCepat.custom && customRange != null
-                          ? '${customRange!.start.day}/${customRange!.start.month} - ${customRange!.end.day}/${customRange!.end.month}'
-                          : 'Custom Tanggal'),
-                      avatar: const Icon(Icons.date_range, size: 16),
+                      label: Text(filter == _FilterCepat.custom && bulanTerpilih != null && tahunTerpilih != null
+                          ? '${_bulanNamaLaporan[bulanTerpilih!]} $tahunTerpilih'
+                          : 'Pilih Bulan'),
+                      avatar: const Icon(Icons.calendar_month, size: 16),
                       backgroundColor: filter == _FilterCepat.custom ? AppColors.biruTua.withOpacity(0.15) : null,
-                      onPressed: _pilihCustomRange,
+                      onPressed: _pilihBulanTahun,
                     ),
                   ]),
                   const SizedBox(height: 20),
