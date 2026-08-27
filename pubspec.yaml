@@ -44,6 +44,16 @@ dependencies:
   googleapis: ^13.2.0
   http: ^1.2.0
 
+  # Dipakai fitur backup lokal (share/export file database & pilih file utk
+  # restore manual). Sudah dipakai di local_backup_service.dart sebelumnya
+  # tapi belum pernah didaftarkan di sini — ditambahkan sekarang.
+  file_picker: ^8.1.2
+  share_plus: ^10.1.2
+
+  # Dipakai fitur Export Laporan (PDF & Excel).
+  pdf: ^3.11.1
+  excel: ^4.0.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

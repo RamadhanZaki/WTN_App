@@ -185,8 +185,10 @@ class BackupService {
 
     try {
       await backupSekarang();
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'otomatis', status: 'berhasil');
     } catch (_) {
       // diamkan, dicoba lagi di sesi berikutnya
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'otomatis', status: 'gagal');
     }
   }
 }

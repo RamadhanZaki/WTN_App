@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../backup_service.dart';
+import '../database_helper.dart';
 import '../app_theme.dart';
 
 class BackupPage extends StatefulWidget {
@@ -61,8 +62,10 @@ class _BackupPageState extends State<BackupPage> {
       await BackupService.instance.backupSekarang();
       final terakhir = await BackupService.instance.getBackupTerakhir();
       setState(() => backupTerakhir = terakhir);
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'manual', status: 'berhasil');
       _pesan('Backup berhasil disimpan ke Google Drive');
     } catch (e) {
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'manual', status: 'gagal', keterangan: '$e');
       _pesan('Backup gagal: $e');
     }
     setState(() => processing = false);
@@ -91,11 +94,51 @@ class _BackupPageState extends State<BackupPage> {
     setState(() => processing = true);
     try {
       await BackupService.instance.restoreDariDrive();
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'restore', status: 'berhasil');
       _pesan('Restore berhasil. Silakan tutup dan buka ulang aplikasi.');
     } catch (e) {
+      await DatabaseHelper.instance.catatRiwayatBackup(tipe: 'restore', status: 'gagal', keterangan: '$e');
       _pesan('Restore gagal: $e');
     }
     setState(() => processing = false);
+  }
+
+  Future<void> _lihatRiwayatBackup() async {
+    final list = await DatabaseHelper.instance.getRiwayatBackup();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6, minChildSize: 0.3, maxChildSize: 0.9, expand: false,
+        builder: (ctx, scrollController) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Riwayat Backup', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: list.isEmpty
+                  ? const Center(child: Text('Belum ada riwayat backup', style: TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                      controller: scrollController,
+                      itemCount: list.length,
+                      itemBuilder: (_, i) {
+                        final r = list[i];
+                        final berhasil = r['status'] == 'berhasil';
+                        final tipeLabel = r['tipe'] == 'manual' ? 'Backup Manual' : r['tipe'] == 'otomatis' ? 'Backup Otomatis' : 'Restore';
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(berhasil ? Icons.check_circle : Icons.error, color: berhasil ? Colors.green : Colors.red, size: 20),
+                          title: Text(tipeLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          subtitle: Text('${_formatWaktu(r['waktu'])}${(r['keterangan'] as String?)?.isNotEmpty == true ? '\n${r['keterangan']}' : ''}', style: const TextStyle(fontSize: 11)),
+                        );
+                      },
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   void _pesan(String teks) {
@@ -112,7 +155,9 @@ class _BackupPageState extends State<BackupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Backup ke Google Drive')),
+      appBar: AppBar(title: const Text('Backup ke Google Drive'), actions: [
+        IconButton(icon: const Icon(Icons.history), tooltip: 'Riwayat Backup', onPressed: _lihatRiwayatBackup),
+      ]),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(

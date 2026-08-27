@@ -6,7 +6,13 @@ plugins {
 
 android {
     namespace = "com.example.wtn_blasting_app"
-    compileSdk = flutter.compileSdkVersion
+    // Dipaksa ke 36 (bukan ikut flutter.compileSdkVersion) karena beberapa
+    // plugin (mis. file_picker -> flutter_plugin_android_lifecycle) sudah
+    // mensyaratkan compileSdk 36+. Aman dinaikkan; compileSdk cuma menentukan
+    // API yang boleh dipakai saat compile, tidak memaksa perangkat pengguna
+    // pakai Android versi baru (itu urusan minSdk/targetSdk yang tetap ikut
+    // pengaturan Flutter seperti semula).
+    compileSdk = 36
     ndkVersion = "28.2.13676358"
 
     compileOptions {

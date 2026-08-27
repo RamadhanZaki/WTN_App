@@ -319,6 +319,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
   bool pakaiHargaManual = false;
   double? hargaDariDaftar; // harga satuan dari daftar/riwayat
   List<Map<String, dynamic>> saran = [];
+  bool _sudahDiketik = false; // true setelah user mengetik sesuatu (bukan sekadar edit item lama)
   List<Map<String, dynamic>> masterWarnaCat = [];
   List<Map<String, dynamic>> masterWarnaLis = [];
   Timer? _debounce;
@@ -357,6 +358,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
   }
 
   void _cari(String q) {
+    _sudahDiketik = true;
     if (q.length < 2) {
       _debounce?.cancel();
       setState(() => saran = []);
@@ -436,17 +438,37 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
             onChanged: _cari,
             decoration: const InputDecoration(labelText: 'Barang / Part', border: OutlineInputBorder()),
           ),
-          if (saran.isNotEmpty)
+          if (saran.isNotEmpty || (_sudahDiketik && _barang.text.trim().isNotEmpty))
             Container(
               margin: const EdgeInsets.only(top: 6),
               decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
               child: Column(
-                children: saran.map((s) => ListTile(
-                  dense: true,
-                  title: Text(s['nama_barang']),
-                  trailing: Text(s['harga_terakhir'] != null ? formatRupiah(s['harga_terakhir']) : '-'),
-                  onTap: () => _pilihSaran(s),
-                )).toList(),
+                children: [
+                  ...saran.map((s) => ListTile(
+                    dense: true,
+                    title: Text(s['nama_barang']),
+                    trailing: Text(s['harga_terakhir'] != null ? formatRupiah(s['harga_terakhir']) : '-'),
+                    onTap: () => _pilihSaran(s),
+                  )),
+                  // Kalau nama yang diketik belum ada persis di katalog, tawarkan
+                  // opsi eksplisit untuk menambahkannya sebagai barang baru.
+                  // Barang baru ini langsung bisa dipakai di transaksi (tersimpan
+                  // ke katalog_barang begitu form barang disimpan).
+                  if (_barang.text.trim().isNotEmpty &&
+                      !saran.any((s) => (s['nama_barang'] as String).toLowerCase() == _barang.text.trim().toLowerCase()))
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.add_circle_outline, size: 18, color: AppColors.biruTua),
+                      title: Text('Tambah Barang Baru: "${_barang.text.trim()}"', style: const TextStyle(color: AppColors.biruTua, fontWeight: FontWeight.w600)),
+                      onTap: () => setState(() {
+                        // Nama sudah terisi dari yang diketik user; cukup tutup
+                        // daftar saran, lanjut isi harga & qty manual di bawah.
+                        hargaDariDaftar = null;
+                        pakaiHargaManual = true;
+                        saran = [];
+                      }),
+                    ),
+                ],
               ),
             ),
           const SizedBox(height: 12),
@@ -523,6 +545,7 @@ class MasterDataEditorPage extends StatefulWidget {
 
 class _MasterDataEditorPageState extends State<MasterDataEditorPage> {
   List<Map<String, dynamic>> data = [];
+  bool tampilkanNonaktif = false;
 
   @override
   void initState() {
@@ -531,7 +554,7 @@ class _MasterDataEditorPageState extends State<MasterDataEditorPage> {
   }
 
   Future<void> _load() async {
-    data = await DatabaseHelper.instance.getMaster(widget.table);
+    data = await DatabaseHelper.instance.getMaster(widget.table, termasukNonaktif: tampilkanNonaktif);
     setState(() {});
   }
 
@@ -562,6 +585,28 @@ class _MasterDataEditorPageState extends State<MasterDataEditorPage> {
     );
   }
 
+  Future<void> _hapus(Map<String, dynamic> d) async {
+    final konfirmasi = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Hapus data ini?'),
+        content: Text('Kalau "${d['nama']}" sudah pernah dipakai di transaksi, data tidak akan dihapus permanen — hanya dinonaktifkan supaya transaksi lama tetap aman.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Lanjutkan')),
+        ],
+      ),
+    );
+    if (konfirmasi != true) return;
+    final dihapusPermanen = await DatabaseHelper.instance.deleteMaster(widget.table, d['id']);
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(dihapusPermanen ? '"${d['nama']}" dihapus' : '"${d['nama']}" dinonaktifkan (sudah dipakai di transaksi)'),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -569,25 +614,42 @@ class _MasterDataEditorPageState extends State<MasterDataEditorPage> {
         title: Text('Kelola ${widget.title}'),
         actions: [IconButton(icon: const Icon(Icons.add), onPressed: () => _tambahEditDialog())],
       ),
-      body: ListView.builder(
-        itemCount: data.length,
-        itemBuilder: (_, i) {
-          final d = data[i];
-          return ListTile(
-            title: Text(d['nama']),
-            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-              IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _tambahEditDialog(existing: d)),
-              IconButton(
-                icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                onPressed: () async {
-                  await DatabaseHelper.instance.deleteMaster(widget.table, d['id']);
-                  _load();
-                },
-              ),
-            ]),
-          );
-        },
-      ),
+      body: Column(children: [
+        SwitchListTile(
+          dense: true,
+          title: const Text('Tampilkan yang Nonaktif', style: TextStyle(fontSize: 13)),
+          value: tampilkanNonaktif,
+          onChanged: (v) { setState(() => tampilkanNonaktif = v); _load(); },
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView.builder(
+            itemCount: data.length,
+            itemBuilder: (_, i) {
+              final d = data[i];
+              final aktif = (d['aktif'] as int? ?? 1) == 1;
+              return ListTile(
+                title: Text(d['nama'], style: TextStyle(color: aktif ? Colors.black : Colors.grey)),
+                subtitle: aktif ? null : const Text('Nonaktif', style: TextStyle(color: Colors.orange, fontSize: 11)),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Switch(
+                    value: aktif,
+                    onChanged: (v) async {
+                      await DatabaseHelper.instance.toggleAktifMaster(widget.table, d['id'], v);
+                      _load();
+                    },
+                  ),
+                  IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _tambahEditDialog(existing: d)),
+                  IconButton(
+                    icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                    onPressed: () => _hapus(d),
+                  ),
+                ]),
+              );
+            },
+          ),
+        ),
+      ]),
     );
   }
 }

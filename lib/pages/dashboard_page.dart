@@ -266,10 +266,23 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(width: 10),
         Expanded(child: _ringkasanTile('Transaksi Antre', ringkasan['antre'] ?? 0, Icons.hourglass_empty, const Color(0xFF6A3FA0))),
       ]),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _ringkasanTile('Belum Diambil', ringkasan['belum_diambil'] ?? 0, Icons.inventory_2, const Color(0xFFB5541B))),
+        const SizedBox(width: 10),
+        Expanded(child: _ringkasanTile('Piutang', ringkasan['piutang'] ?? 0, Icons.receipt_long, const Color(0xFFB02A2A), isRupiah: true)),
+      ]),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _ringkasanTile('Pengeluaran', ringkasan['pengeluaran'] ?? 0, Icons.trending_down, const Color(0xFF6A3FA0), isRupiah: true)),
+        const SizedBox(width: 10),
+        Expanded(child: _ringkasanTile('Laba Bersih', ringkasan['laba_bersih'] ?? 0, Icons.savings, const Color(0xFF1B7A3D), isRupiah: true)),
+      ]),
     ]);
   }
 
-  Widget _ringkasanTile(String label, dynamic value, IconData icon, Color color) {
+  Widget _ringkasanTile(String label, dynamic value, IconData icon, Color color, {bool isRupiah = false}) {
+    final teks = isRupiah ? formatRupiah(value) : '$value';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
@@ -279,7 +292,7 @@ class _DashboardPageState extends State<DashboardPage> {
         Row(children: [
           CircleAvatar(radius: 18, backgroundColor: color.withOpacity(0.12), child: Icon(icon, color: color, size: 18)),
           const SizedBox(width: 10),
-          Text('$value', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
+          Expanded(child: Text(teks, style: TextStyle(fontSize: isRupiah ? 14 : 20, fontWeight: FontWeight.bold, color: color), maxLines: 1, overflow: TextOverflow.ellipsis)),
         ]),
       ]),
     );
@@ -287,6 +300,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _orderTile(Map<String, dynamic> t) {
     final status = (t['status'] ?? 'pending') as String;
+    final statusAmbil = (t['status_pengambilan'] ?? 'belum_diambil') as String;
+    final statusBayar = (t['status_pembayaran'] ?? 'belum_bayar') as String;
     final lis = (t['daftar_warna_lis'] ?? '').toString();
     return Card(
       child: ListTile(
@@ -298,22 +313,28 @@ class _DashboardPageState extends State<DashboardPage> {
           Text('Warna: ${t['daftar_warna_cat'] ?? '-'}', style: const TextStyle(fontSize: 12)),
           if (lis.isNotEmpty) Text('Lis: $lis', style: const TextStyle(fontSize: 12)),
           Text('Proses: ${t['proses'] ?? '-'}', style: const TextStyle(fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 4, runSpacing: 4, children: [
+            _miniBadge(AppColors.statusLabel(status), AppColors.statusBg(status), AppColors.statusText(status)),
+            _miniBadge(AppColors.ambilLabel(statusAmbil), AppColors.ambilBg(statusAmbil), AppColors.ambilText(statusAmbil)),
+            _miniBadge(AppColors.bayarLabel(statusBayar), AppColors.bayarBg(statusBayar), AppColors.bayarText(statusBayar)),
+          ]),
         ]),
         isThreeLine: true,
-        trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: AppColors.statusBg(status), borderRadius: BorderRadius.circular(8)),
-            child: Text(AppColors.statusLabel(status), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.statusText(status))),
-          ),
-          const SizedBox(height: 4),
-          Text(formatRupiah(t['total_harga']), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-        ]),
+        trailing: Text(formatRupiah(t['total_harga']), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
         onTap: () async {
           await Navigator.push(context, MaterialPageRoute(builder: (_) => DetailTransaksiPage(orderId: t['id'])));
           _load();
         },
       ),
+    );
+  }
+
+  Widget _miniBadge(String label, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      child: Text(label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: fg)),
     );
   }
 }
