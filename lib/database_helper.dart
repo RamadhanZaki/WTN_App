@@ -1392,10 +1392,35 @@ class DatabaseHelper {
     final awal = mulai.toIso8601String().substring(0, 10);
     final akhirEksklusif = selesai.add(const Duration(days: 1)).toIso8601String().substring(0, 10);
 
-    final rows = await db.rawQuery('''
-      SELECT t.*, (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
-      FROM transaksi t WHERE t.tanggal >= ? AND t.tanggal < ?
-    ''', [awal, akhirEksklusif]);
+    // Ditambahkan supaya Laporan Transaksi juga menampilkan: Total Omset,
+    // pembagian Langgeng/Juki/Rio (sama seperti di Dashboard), serta uang
+    // masuk kas/pengeluaran/laba bersih -- dihitung lewat getLaporanKeuangan()
+    // yang sama persis dipakai Page Laporan Keuangan, supaya angkanya selalu
+    // konsisten di semua halaman (dan di Export Laporan) untuk periode yang sama.
+    final results = await Future.wait([
+      db.rawQuery('''
+        SELECT t.*, (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+        FROM transaksi t WHERE t.tanggal >= ? AND t.tanggal < ?
+      ''', [awal, akhirEksklusif]),
+      db.rawQuery('''
+        SELECT SUM(bagian_langgeng) as langgeng, SUM(bagian_juki) as juki, SUM(bagian_rio) as rio
+        FROM transaksi WHERE tanggal >= ? AND tanggal < ?
+      '''  , [awal, akhirEksklusif]),
+      // Total Omset: nilai seluruh barang/jasa pada transaksi periode ini
+      // (bukan yang sudah dibayar saja) -- sama seperti kartu "Omset" di Dashboard.
+      db.rawQuery('''
+        SELECT SUM(oi.harga) as total
+        FROM order_items oi
+        JOIN transaksi t ON t.id = oi.transaksi_id
+        WHERE t.tanggal >= ? AND t.tanggal < ?
+      ''', [awal, akhirEksklusif]),
+      getLaporanKeuangan(mulai: mulai, selesai: selesai),
+    ]);
+
+    final rows = results[0] as List<Map<String, dynamic>>;
+    final bagianRow = results[1] as List<Map<String, dynamic>>;
+    final omzetRow = results[2] as List<Map<String, dynamic>>;
+    final keuangan = results[3] as Map<String, dynamic>;
 
     int total = rows.length, selesaiC = 0, prosesC = 0, antreC = 0, pendingC = 0;
     int belumDiambil = 0, lunasC = 0, dpC = 0, piutangC = 0;
@@ -1433,6 +1458,13 @@ class DatabaseHelper {
       'dp': dpC,
       'piutang_count': piutangC,
       'total_piutang': totalPiutang,
+      'omzet': (omzetRow.first['total'] as num?) ?? 0,
+      'uang_masuk_kas': keuangan['pemasukan'] ?? 0,
+      'pengeluaran': keuangan['pengeluaran'] ?? 0,
+      'laba_bersih': keuangan['laba_bersih'] ?? 0,
+      'langgeng': bagianRow.first['langgeng'] ?? 0,
+      'juki': bagianRow.first['juki'] ?? 0,
+      'rio': bagianRow.first['rio'] ?? 0,
     };
   }
 }

@@ -11,7 +11,10 @@ import '../app_theme.dart';
 
 enum _JenisLaporan { transaksi, pemasukan, pengeluaran, labaRugi }
 enum _FormatExport { pdf, excel }
-enum _PeriodeCepat { hariIni, mingguIni, bulanIni, tahunIni, custom }
+// Hari Ini / Minggu Ini / Bulan Ini / Custom Tanggal dihapus supaya picker
+// periode di halaman ini sama seperti Page Laporan Transaksi: cuma "Tahun
+// Ini" + "Pilih Bulan" (dialog Bulan & Tahun).
+enum _PeriodeCepat { tahunIni, bulanTahun }
 
 class ExportLaporanPage extends StatefulWidget {
   const ExportLaporanPage({super.key});
@@ -22,34 +25,96 @@ class ExportLaporanPage extends StatefulWidget {
 class _ExportLaporanPageState extends State<ExportLaporanPage> {
   _JenisLaporan jenis = _JenisLaporan.transaksi;
   _FormatExport format = _FormatExport.pdf;
-  _PeriodeCepat periode = _PeriodeCepat.bulanIni;
-  DateTimeRange? customRange;
+  _PeriodeCepat periode = _PeriodeCepat.bulanTahun;
   bool memproses = false;
+
+  // Sama seperti Page Transaksi & Page Pengeluaran: dropdown Bulan/Tahun di
+  // sini HANYA menampilkan periode yang benar-benar ada datanya di database
+  // (bukan 12 bulan / rentang tahun tetap), supaya tidak pernah menampilkan
+  // bulan/tahun kosong yang tidak sesuai isi database.
+  int? bulanPilih;
+  int? tahunPilih;
+  List<int> tahunTersedia = [DateTime.now().year];
+  List<int> bulanTersedia = [DateTime.now().month];
+  bool periodeSiap = false;
+
+  final bulanNama = const ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+  @override
+  void initState() {
+    super.initState();
+    _muatPeriodeTersedia();
+  }
+
+  // Jenis laporan menentukan tabel mana yang jadi sumber periode:
+  // - transaksi/pemasukan -> tabel transaksi
+  // - pengeluaran -> tabel kas_keluar (baris pengeluaran saja)
+  // - labaRugi -> gabungan keduanya, karena laba/rugi butuh pemasukan & pengeluaran
+  Future<List<int>> _ambilTahunTersedia() async {
+    if (jenis == _JenisLaporan.pengeluaran) {
+      return DatabaseHelper.instance.getTahunPengeluaranTersedia();
+    } else if (jenis == _JenisLaporan.labaRugi) {
+      final a = await DatabaseHelper.instance.getTahunTransaksiTersedia();
+      final b = await DatabaseHelper.instance.getTahunPengeluaranTersedia();
+      final gabung = {...a, ...b}.toList()..sort((x, y) => y.compareTo(x));
+      return gabung;
+    }
+    return DatabaseHelper.instance.getTahunTransaksiTersedia();
+  }
+
+  Future<List<int>> _ambilBulanTersedia(int tahun) async {
+    if (jenis == _JenisLaporan.pengeluaran) {
+      return DatabaseHelper.instance.getBulanPengeluaranTersedia(tahun);
+    } else if (jenis == _JenisLaporan.labaRugi) {
+      final a = await DatabaseHelper.instance.getBulanTransaksiTersedia(tahun);
+      final b = await DatabaseHelper.instance.getBulanPengeluaranTersedia(tahun);
+      final gabung = {...a, ...b}.toList()..sort((x, y) => y.compareTo(x));
+      return gabung;
+    }
+    return DatabaseHelper.instance.getBulanTransaksiTersedia(tahun);
+  }
+
+  // Dipanggil saat halaman dibuka & setiap kali Jenis Laporan diganti, karena
+  // periode yang tersedia bisa berbeda antara transaksi dan pengeluaran.
+  Future<void> _muatPeriodeTersedia() async {
+    setState(() => periodeSiap = false);
+    final now = DateTime.now();
+    final tahunList = await _ambilTahunTersedia();
+
+    if (tahunList.isEmpty) {
+      tahunTersedia = [now.year];
+      bulanTersedia = [now.month];
+      tahunPilih = now.year;
+      bulanPilih = now.month;
+      periodeSiap = true;
+      if (mounted) setState(() {});
+      return;
+    }
+
+    tahunTersedia = tahunList;
+    if (tahunPilih == null || !tahunTersedia.contains(tahunPilih)) tahunPilih = tahunTersedia.first;
+
+    final bulanList = await _ambilBulanTersedia(tahunPilih!);
+    bulanTersedia = bulanList.isEmpty ? [now.month] : bulanList;
+    if (bulanPilih == null || !bulanTersedia.contains(bulanPilih)) bulanPilih = bulanTersedia.first;
+
+    periodeSiap = true;
+    if (mounted) setState(() {});
+  }
 
   (DateTime, DateTime) _rentang() {
     final now = DateTime.now();
     switch (periode) {
-      case _PeriodeCepat.hariIni:
-        return (DateTime(now.year, now.month, now.day), now);
-      case _PeriodeCepat.mingguIni:
-        final awal = now.subtract(Duration(days: now.weekday - 1));
-        return (DateTime(awal.year, awal.month, awal.day), now);
-      case _PeriodeCepat.bulanIni:
-        return (DateTime(now.year, now.month, 1), now);
       case _PeriodeCepat.tahunIni:
         return (DateTime(now.year, 1, 1), now);
-      case _PeriodeCepat.custom:
-        return customRange != null ? (customRange!.start, customRange!.end) : (DateTime(now.year, now.month, 1), now);
-    }
-  }
-
-  String _labelPeriode(_PeriodeCepat f) {
-    switch (f) {
-      case _PeriodeCepat.hariIni: return 'Hari Ini';
-      case _PeriodeCepat.mingguIni: return 'Minggu Ini';
-      case _PeriodeCepat.bulanIni: return 'Bulan Ini';
-      case _PeriodeCepat.tahunIni: return 'Tahun Ini';
-      case _PeriodeCepat.custom: return 'Custom';
+      case _PeriodeCepat.bulanTahun:
+        final b = bulanPilih ?? now.month;
+        final t = tahunPilih ?? now.year;
+        final awal = DateTime(t, b, 1);
+        // Rentang satu bulan penuh: tanggal 1 s.d. hari terakhir bulan itu,
+        // konsisten dengan pola di Page Laporan Transaksi.
+        final akhir = DateTime(t, b + 1, 0);
+        return (awal, akhir);
     }
   }
 
@@ -62,9 +127,62 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
     }
   }
 
-  Future<void> _pilihCustomRange() async {
-    final r = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDateRange: customRange);
-    if (r != null) setState(() { customRange = r; periode = _PeriodeCepat.custom; });
+  // Dialog "Pilih Bulan & Tahun" — sama seperti di Page Laporan Transaksi,
+  // tapi daftar bulan/tahunnya diambil dari data yang benar-benar ada di
+  // database (tahunTersedia/_ambilBulanTersedia), bukan rentang tetap.
+  Future<void> _pilihBulanTahun() async {
+    final now = DateTime.now();
+    int bulanDialog = bulanPilih ?? now.month;
+    int tahunDialog = tahunPilih ?? now.year;
+    List<int> bulanListDialog = bulanTersedia.isEmpty ? [now.month] : List<int>.from(bulanTersedia);
+
+    final hasil = await showDialog<(int, int)>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Pilih Bulan & Tahun'),
+              content: Row(mainAxisSize: MainAxisSize.min, children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(labelText: 'Bulan'),
+                    value: bulanDialog,
+                    items: (List<int>.from(bulanListDialog)..sort()).map((b) => DropdownMenuItem(value: b, child: Text(bulanNama[b]))).toList(),
+                    onChanged: (v) => setStateDialog(() => bulanDialog = v ?? bulanDialog),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(labelText: 'Tahun'),
+                    value: tahunDialog,
+                    items: tahunTersedia.map((t) => DropdownMenuItem(value: t, child: Text('$t'))).toList(),
+                    onChanged: (v) async {
+                      final tahunBaru = v ?? tahunDialog;
+                      final bulanBaru = await _ambilBulanTersedia(tahunBaru);
+                      setStateDialog(() {
+                        tahunDialog = tahunBaru;
+                        bulanListDialog = bulanBaru.isEmpty ? [now.month] : bulanBaru;
+                        if (!bulanListDialog.contains(bulanDialog)) bulanDialog = bulanListDialog.first;
+                      });
+                    },
+                  ),
+                ),
+              ]),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, (bulanDialog, tahunDialog)), child: const Text('Pilih')),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (hasil != null) {
+      setState(() { bulanPilih = hasil.$1; tahunPilih = hasil.$2; periode = _PeriodeCepat.bulanTahun; });
+    }
   }
 
   String _fmtTanggal(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
@@ -75,58 +193,125 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
       case _JenisLaporan.transaksi:
         final list = await DatabaseHelper.instance.cariTransaksi(tanggalMulai: mulai, tanggalSelesai: selesai);
         final rows = <List<String>>[
-          ['No Transaksi', 'Tanggal', 'Pelanggan', 'Motor', 'Proses', 'Total', 'Status', 'Pengambilan', 'Pembayaran'],
+          ['No Transaksi', 'Tanggal', 'Pelanggan', 'Motor', 'Warna Cat', 'Warna Lis', 'Barang', 'Proses', 'Total', 'Sisa Bayar', 'Status', 'Pengambilan', 'Pembayaran', 'Catatan'],
         ];
+        double totalSemua = 0;
         for (final t in list) {
+          final totalHarga = (t['total_harga'] as num?)?.toDouble() ?? 0;
+          final totalDibayar = (t['total_dibayar'] as num?)?.toDouble() ?? 0;
+          final sisa = totalHarga > totalDibayar ? totalHarga - totalDibayar : 0;
+          totalSemua += totalHarga;
           rows.add([
             '${t['no_transaksi'] ?? '-'}',
             '${t['tanggal'] ?? '-'}',
             '${t['asal'] ?? '-'}',
             '${t['motor'] ?? '-'}',
+            '${t['warna_cat'] ?? '-'}',
+            '${t['warna_lis'] ?? '-'}',
+            '${t['daftar_barang'] ?? '-'}',
             '${t['proses'] ?? '-'}',
-            formatRupiah(t['total_harga']),
+            formatRupiah(totalHarga),
+            sisa > 0 ? formatRupiah(sisa) : '-',
             AppColors.statusLabel((t['status'] ?? 'pending') as String),
             AppColors.ambilLabel((t['status_pengambilan'] ?? 'belum_diambil') as String),
             AppColors.bayarLabel((t['status_pembayaran'] ?? 'belum_bayar') as String),
+            '${t['catatan'] ?? '-'}',
           ]);
         }
+        if (list.isNotEmpty) rows.add(['', '', '', '', '', '', '', 'TOTAL', formatRupiah(totalSemua), '', '', '', '', '']);
         return rows;
       case _JenisLaporan.pemasukan:
         final list = await DatabaseHelper.instance.cariTransaksi(tanggalMulai: mulai, tanggalSelesai: selesai);
         final rows = <List<String>>[
-          ['No Transaksi', 'Tanggal', 'Pelanggan', 'Total Tagihan', 'Sudah Dibayar', 'Status'],
+          ['No Transaksi', 'Tanggal', 'Pelanggan', 'Total Tagihan', 'Sudah Dibayar', 'Sisa/Piutang', 'Status'],
         ];
+        double totalTagihan = 0, totalBayar = 0, totalSisa = 0;
         for (final t in list) {
+          final th = (t['total_harga'] as num?)?.toDouble() ?? 0;
+          final td = (t['total_dibayar'] as num?)?.toDouble() ?? 0;
+          final sisa = th > td ? th - td : 0;
+          totalTagihan += th;
+          totalBayar += td;
+          totalSisa += sisa;
           rows.add([
             '${t['no_transaksi'] ?? '-'}',
             '${t['tanggal'] ?? '-'}',
             '${t['asal'] ?? '-'}',
-            formatRupiah(t['total_harga']),
-            formatRupiah(t['total_dibayar'] ?? 0),
+            formatRupiah(th),
+            formatRupiah(td),
+            sisa > 0 ? formatRupiah(sisa) : '-',
             AppColors.bayarLabel((t['status_pembayaran'] ?? 'belum_bayar') as String),
           ]);
         }
+        if (list.isNotEmpty) rows.add(['', 'TOTAL', '', formatRupiah(totalTagihan), formatRupiah(totalBayar), formatRupiah(totalSisa), '']);
         return rows;
       case _JenisLaporan.pengeluaran:
         final list = await DatabaseHelper.instance.getPengeluaranByBulan(mulai.month, mulai.year, tanggalMulai: mulai, tanggalSelesai: selesai);
         final rows = <List<String>>[
           ['Tanggal', 'Sumber Kas', 'Nominal', 'Catatan'],
         ];
+        double totalNominal = 0;
         for (final r in list) {
-          rows.add(['${r['tanggal']}', '${r['sumber']}', formatRupiah(r['nominal']), '${r['catatan'] ?? '-'}']);
+          final nominal = (r['nominal'] as num?)?.toDouble() ?? 0;
+          totalNominal += nominal;
+          rows.add(['${r['tanggal']}', '${r['sumber']}', formatRupiah(nominal), '${r['catatan'] ?? '-'}']);
         }
+        if (list.isNotEmpty) rows.add(['', 'TOTAL', formatRupiah(totalNominal), '']);
         return rows;
       case _JenisLaporan.labaRugi:
-        final data = await DatabaseHelper.instance.getLaporanKeuangan(mulai: mulai, selesai: selesai);
-        return [
+        final d = await DatabaseHelper.instance.getLaporanTransaksi(mulai: mulai, selesai: selesai);
+        final saldo = await DatabaseHelper.instance.getSaldoTerakhir();
+        final rows = <List<String>>[
           ['Keterangan', 'Nominal'],
-          ['Total Pemasukan', formatRupiah(data['pemasukan'])],
-          ['Total Pengeluaran', formatRupiah(data['pengeluaran'])],
-          ['Laba Bersih', formatRupiah(data['laba_bersih'])],
-          ['Saldo (Semua Kas)', formatRupiah(data['saldo'])],
-          ['Piutang', formatRupiah(data['piutang'])],
+          ['Total Omset', formatRupiah(d['omzet'])],
+          ['Uang Masuk Kas (Pemasukan)', formatRupiah(d['uang_masuk_kas'])],
+          ['Total Pengeluaran', formatRupiah(d['pengeluaran'])],
+          ['Laba Bersih', formatRupiah(d['laba_bersih'])],
+          ['Piutang Belum Tertagih', formatRupiah(d['total_piutang'])],
+          ['Saldo Kas', formatRupiah(saldo['kas'])],
+          ['Saldo Kas Vapor', formatRupiah(saldo['vapor'])],
+          ['Saldo Kas Maintenance', formatRupiah(saldo['alat'])],
+          ['Total Saldo (Semua Kas)', formatRupiah((saldo['kas'] ?? 0) + (saldo['vapor'] ?? 0) + (saldo['alat'] ?? 0))],
         ];
+        final langgeng = (d['langgeng'] as num?) ?? 0;
+        final juki = (d['juki'] as num?) ?? 0;
+        final rio = (d['rio'] as num?) ?? 0;
+        if (langgeng > 0) rows.add(['Bagian Langgeng', formatRupiah(langgeng)]);
+        if (juki > 0) rows.add(['Bagian Juki', formatRupiah(juki)]);
+        if (rio > 0) rows.add(['Bagian Rio', formatRupiah(rio)]);
+        rows.addAll([
+          ['Jumlah Transaksi', '${d['total_transaksi']}'],
+          ['  - Selesai', '${d['selesai']}'],
+          ['  - Proses', '${d['proses']}'],
+          ['  - Antre', '${d['antre']}'],
+          ['  - Pending', '${d['pending']}'],
+          ['  - Belum Diambil', '${d['belum_diambil']}'],
+        ]);
+        return rows;
     }
+  }
+
+  // Ringkasan tambahan (Total Omset, Uang Masuk Kas, Pengeluaran, Laba
+  // Bersih, Pembagian Langgeng/Juki/Rio) ditampilkan untuk semua jenis
+  // laporan (bukan cuma Transaksi) supaya gambaran keuangan periode yang
+  // sama selalu konsisten di export apa pun yang dipilih.
+  Future<List<List<String>>> _ambilRingkasan(DateTime mulai, DateTime selesai) async {
+    if (jenis == _JenisLaporan.labaRugi) return []; // sudah jadi tabel utama
+    final d = await DatabaseHelper.instance.getLaporanTransaksi(mulai: mulai, selesai: selesai);
+    final rows = <List<String>>[
+      ['Total Omset', formatRupiah(d['omzet'])],
+      ['Uang Masuk Kas', formatRupiah(d['uang_masuk_kas'])],
+      ['Pengeluaran', formatRupiah(d['pengeluaran'])],
+      ['Laba Bersih', formatRupiah(d['laba_bersih'])],
+      ['Piutang Belum Tertagih', formatRupiah(d['total_piutang'])],
+    ];
+    final langgeng = (d['langgeng'] as num?) ?? 0;
+    final juki = (d['juki'] as num?) ?? 0;
+    final rio = (d['rio'] as num?) ?? 0;
+    if (langgeng > 0) rows.add(['Bagian Langgeng', formatRupiah(langgeng)]);
+    if (juki > 0) rows.add(['Bagian Juki', formatRupiah(juki)]);
+    if (rio > 0) rows.add(['Bagian Rio', formatRupiah(rio)]);
+    return rows;
   }
 
   Future<void> _export() async {
@@ -134,8 +319,11 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
     try {
       final rows = await _ambilBaris();
       final (mulai, selesai) = _rentang();
+      final ringkasan = await _ambilRingkasan(mulai, selesai);
       final judul = _labelJenis(jenis);
       final periodeTeks = '${_fmtTanggal(mulai)} - ${_fmtTanggal(selesai)}';
+      final now = DateTime.now();
+      final dicetakTeks = '${_fmtTanggal(now)} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
       final namaFileDasar = '${jenis.name}_${DateTime.now().millisecondsSinceEpoch}';
 
       final tempDir = await getTemporaryDirectory();
@@ -150,15 +338,30 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
               pw.Text('WTN Blasting - $judul', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 4),
               pw.Text('Periode: $periodeTeks', style: const pw.TextStyle(fontSize: 11)),
+              pw.Text('Dicetak: $dicetakTeks', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
               pw.SizedBox(height: 12),
               pw.TableHelper.fromTextArray(
                 headers: rows.first,
                 data: rows.skip(1).toList(),
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
-                cellStyle: const pw.TextStyle(fontSize: 8),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
+                cellStyle: const pw.TextStyle(fontSize: 7),
                 cellAlignment: pw.Alignment.centerLeft,
                 border: pw.TableBorder.all(width: 0.4, color: PdfColors.grey400),
               ),
+              if (ringkasan.isNotEmpty) ...[
+                pw.SizedBox(height: 16),
+                pw.Text('Ringkasan', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                pw.SizedBox(height: 6),
+                pw.TableHelper.fromTextArray(
+                  headers: const ['Keterangan', 'Nominal'],
+                  data: ringkasan,
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+                  cellStyle: const pw.TextStyle(fontSize: 9),
+                  cellAlignment: pw.Alignment.centerLeft,
+                  border: pw.TableBorder.all(width: 0.4, color: PdfColors.grey400),
+                  columnWidths: {0: const pw.FlexColumnWidth(3), 1: const pw.FlexColumnWidth(2)},
+                ),
+              ],
             ],
           ),
         );
@@ -169,9 +372,17 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
         final sheet = workbook['Laporan'];
         sheet.appendRow([xl.TextCellValue('WTN Blasting - $judul')]);
         sheet.appendRow([xl.TextCellValue('Periode: $periodeTeks')]);
+        sheet.appendRow([xl.TextCellValue('Dicetak: $dicetakTeks')]);
         sheet.appendRow([]);
         for (final row in rows) {
           sheet.appendRow(row.map((v) => xl.TextCellValue(v)).toList());
+        }
+        if (ringkasan.isNotEmpty) {
+          sheet.appendRow([]);
+          sheet.appendRow([xl.TextCellValue('Ringkasan')]);
+          for (final row in ringkasan) {
+            sheet.appendRow(row.map((v) => xl.TextCellValue(v)).toList());
+          }
         }
         workbook.delete('Sheet1');
         file = File(p.join(tempDir.path, '$namaFileDasar.xlsx'));
@@ -203,7 +414,10 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
               ChoiceChip(
                 label: Text(_labelJenis(j)),
                 selected: jenis == j,
-                onSelected: (_) => setState(() => jenis = j),
+                onSelected: (_) {
+                  setState(() => jenis = j);
+                  _muatPeriodeTersedia();
+                },
                 selectedColor: AppColors.biruTua,
                 labelStyle: TextStyle(color: jenis == j ? Colors.white : Colors.black87, fontSize: 12),
               ),
@@ -212,19 +426,20 @@ class _ExportLaporanPageState extends State<ExportLaporanPage> {
           const Text('Periode', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final f in [_PeriodeCepat.hariIni, _PeriodeCepat.mingguIni, _PeriodeCepat.bulanIni, _PeriodeCepat.tahunIni])
-              ChoiceChip(
-                label: Text(_labelPeriode(f)),
-                selected: periode == f,
-                onSelected: (_) => setState(() => periode = f),
-                selectedColor: AppColors.biruTua,
-                labelStyle: TextStyle(color: periode == f ? Colors.white : Colors.black87, fontSize: 12),
-              ),
+            ChoiceChip(
+              label: const Text('Tahun Ini'),
+              selected: periode == _PeriodeCepat.tahunIni,
+              onSelected: (_) => setState(() => periode = _PeriodeCepat.tahunIni),
+              selectedColor: AppColors.biruTua,
+              labelStyle: TextStyle(color: periode == _PeriodeCepat.tahunIni ? Colors.white : Colors.black87, fontSize: 12),
+            ),
             ActionChip(
-              label: Text(periode == _PeriodeCepat.custom && customRange != null ? '${_fmtTanggal(customRange!.start)} - ${_fmtTanggal(customRange!.end)}' : 'Custom Tanggal'),
-              avatar: const Icon(Icons.date_range, size: 16),
-              backgroundColor: periode == _PeriodeCepat.custom ? AppColors.biruTua.withOpacity(0.15) : null,
-              onPressed: _pilihCustomRange,
+              label: Text(periode == _PeriodeCepat.bulanTahun && bulanPilih != null && tahunPilih != null
+                  ? '${bulanNama[bulanPilih!]} $tahunPilih'
+                  : 'Pilih Bulan'),
+              avatar: const Icon(Icons.calendar_month, size: 16),
+              backgroundColor: periode == _PeriodeCepat.bulanTahun ? AppColors.biruTua.withOpacity(0.15) : null,
+              onPressed: periodeSiap ? _pilihBulanTahun : null,
             ),
           ]),
           const SizedBox(height: 6),

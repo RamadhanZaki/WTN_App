@@ -275,6 +275,12 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
                   ]),
                   const SizedBox(height: 20),
                   Row(children: [
+                    Expanded(child: _miniRp('Total Omset', data['omzet'], AppColors.biruTua)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _miniRp('Laba Bersih', data['laba_bersih'], const Color(0xFF1B7A3D))),
+                  ]),
+                  const SizedBox(height: 20),
+                  Row(children: [
                     Expanded(child: _mini('Total Transaksi', data['total_transaksi'], AppColors.biruTua)),
                     const SizedBox(width: 10),
                     Expanded(child: _mini('Selesai', data['selesai'], const Color(0xFF1B7A3D))),
@@ -303,10 +309,39 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
                     const SizedBox(width: 10),
                     Expanded(child: _miniRp('Total Piutang', data['total_piutang'], const Color(0xFFB02A2A))),
                   ]),
+                  const SizedBox(height: 20),
+                  _miniRp('Uang Transaksi Masuk Kas', data['uang_masuk_kas'], const Color(0xFF1B7A3D)),
+                  const SizedBox(height: 10),
+                  _pembagianSection(),
                 ],
               ),
             ),
     );
+  }
+
+  // Ditampilkan hanya kalau nilainya > 0, sama seperti di Dashboard, supaya
+  // tidak menampilkan kartu "Rp 0" untuk bagian yang memang tidak dipakai
+  // pada periode ini.
+  Widget _pembagianSection() {
+    final langgeng = (data['langgeng'] as num?) ?? 0;
+    final juki = (data['juki'] as num?) ?? 0;
+    final rio = (data['rio'] as num?) ?? 0;
+    final items = <Widget>[];
+    if (langgeng > 0) items.add(Expanded(child: _miniRp('Langgeng', langgeng, AppColors.biruTua)));
+    if (juki > 0) items.add(Expanded(child: _miniRp('Juki', juki, AppColors.biruTua)));
+    if (rio > 0) items.add(Expanded(child: _miniRp('Rio', rio, AppColors.biruTua)));
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Pembagian', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+      const SizedBox(height: 10),
+      Row(children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          items[i],
+        ],
+      ]),
+    ]);
   }
 
   Widget _mini(String label, dynamic value, Color color) {
