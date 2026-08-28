@@ -4,7 +4,6 @@ import 'order_form_page.dart';
 import 'kas_keluar_page.dart';
 import 'backup_page.dart';
 import 'laporan_page.dart';
-import 'master_data_extra_page.dart';
 import 'audit_log_page.dart';
 import 'export_page.dart';
 
@@ -94,10 +93,6 @@ class _LainnyaPageState extends State<LainnyaPage> {
           ListTile(leading: const Icon(Icons.palette), title: const Text('Kelola Warna Cat'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_warna_cat', title: 'Warna Cat')))),
           ListTile(leading: const Icon(Icons.brush), title: const Text('Kelola Warna Lis'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_warna_lis', title: 'Warna Lis')))),
           ListTile(leading: const Icon(Icons.build), title: const Text('Kelola Jenis Proses'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_proses', title: 'Jenis Proses')))),
-          ListTile(leading: const Icon(Icons.inventory_2), title: const Text('Kelola Barang'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KelolaBarangPage()))),
-          ListTile(leading: const Icon(Icons.people), title: const Text('Kelola Pelanggan'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KelolaPelangganPage()))),
-          ListTile(leading: const Icon(Icons.admin_panel_settings), title: const Text('Kelola User'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KelolaUserPage()))),
-          ListTile(leading: const Icon(Icons.account_balance_wallet), title: const Text('Kelola Kas'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KelolaKasPage()))),
           const Divider(),
           ListTile(leading: const Icon(Icons.history_edu), title: const Text('Riwayat Aktivitas'), subtitle: const Text('Audit log semua aksi penting'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditLogPage()))),
         ],
