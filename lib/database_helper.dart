@@ -44,7 +44,7 @@ class DatabaseHelper {
   // Versi skema saat ini. Naikkan angka ini setiap kali menambah migrasi baru
   // di dalam _migrasi() agar migrasi lama otomatis di-skip pada app yang sudah
   // pernah dibuka sebelumnya.
-  static const int _dbVersion = 7;
+  static const int _dbVersion = 8;
 
   Future<void> _migrasi(Database db) async {
     // Skip seluruh proses migrasi kalau versi skema sudah paling baru.
@@ -76,6 +76,8 @@ class DatabaseHelper {
     await tambahKolom('proses', 'TEXT');
     await tambahKolom('catatan', 'TEXT');
     await tambahKolom('kas_maintenance', 'REAL');
+    await tambahKolom('kas', 'REAL');
+    await tambahKolom('kas_vapor', 'REAL');
 
     if (!nama.contains('status')) {
       await db.execute('''

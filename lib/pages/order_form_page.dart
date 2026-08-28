@@ -122,14 +122,22 @@ class _OrderFormPageState extends State<OrderFormPage> {
       'catatan': _catatan.text.trim(),
     };
 
-    if (isEdit) {
-      await DatabaseHelper.instance.updateOrder(id: widget.orderId!, header: header, items: items);
-    } else {
-      await DatabaseHelper.instance.insertOrder(header: header, items: items);
+    try {
+      if (isEdit) {
+        await DatabaseHelper.instance.updateOrder(id: widget.orderId!, header: header, items: items);
+      } else {
+        await DatabaseHelper.instance.insertOrder(header: header, items: items);
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menyimpan order: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => saving = false);
     }
-
-    setState(() => saving = false);
-    if (mounted) Navigator.pop(context, true);
   }
 
   @override
