@@ -655,6 +655,18 @@ class DatabaseHelper {
   // baru bisa "mundur" lalu bentrok/dobel dengan transaksi lain yang masih
   // ada (contoh: TRX-00229 dihapus -> COUNT turun -> transaksi baru
   // kebagian TRX-00230 padahal itu sudah dipakai transaksi lain).
+  // Cek apakah suatu no_transaksi sudah dipakai transaksi LAIN (bukan
+  // dirinya sendiri saat sedang diedit). Dipakai untuk validasi saat user
+  // mengganti No Transaksi manual (mis. untuk membetulkan nomor dobel),
+  // supaya tidak menciptakan duplikat baru.
+  Future<bool> noTransaksiSudahDipakai(String noTransaksi, {int? kecualiId}) async {
+    final db = await database;
+    final rows = kecualiId == null
+        ? await db.query('transaksi', where: 'no_transaksi = ?', whereArgs: [noTransaksi])
+        : await db.query('transaksi', where: 'no_transaksi = ? AND id != ?', whereArgs: [noTransaksi, kecualiId]);
+    return rows.isNotEmpty;
+  }
+
   Future<String> generateNoTransaksi() async {
     final db = await database;
     final rows = await db.rawQuery("SELECT no_transaksi FROM transaksi WHERE no_transaksi LIKE 'TRX-%'");
@@ -710,16 +722,62 @@ class DatabaseHelper {
   // Dipakai untuk mengoreksi transaksi yang salah input. Setiap penghapusan
   // WAJIB tercatat di Audit Log supaya tetap bisa ditelusuri siapa & kapan
   // menghapus, serta data apa yang hilang (no. transaksi & asal pelanggan).
+  //
+  // PENTING soal pembayaran: transaksi yang mau dihapus bisa saja SUDAH
+  // punya histori pembayaran (uang tunai sudah tercatat masuk ke saldo kas
+  // lewat tambahPembayaran). Kalau baris `pembayaran` dibiarkan begitu saja:
+  // 1) getLaporanKeuangan tetap menjumlahkan nominalnya sebagai "pemasukan"
+  //    walau transaksinya sudah tidak ada lagi (laporan jadi salah).
+  // 2) Saldo kas (kas_keluar) TIDAK ikut turun, padahal transaksi yang
+  //    "membenarkan" uang itu masuk sudah dihapus.
+  // Maka sebelum baris pembayaran dihapus, tiap nominalnya dibuatkan baris
+  // pengeluaran BALIK (reversal) di kas_keluar per jenis kas, supaya saldo &
+  // semua laporan tetap akurat.
   Future<void> deleteOrder(int id) async {
     final db = await database;
     final header = await getOrderHeader(id);
+    final noTransaksi = header?['no_transaksi'] ?? '#$id';
+    final asal = header?['asal'] ?? '-';
+
+    final pembayaranList = await db.query('pembayaran', where: 'transaksi_id = ?', whereArgs: [id]);
+    final totalPerJenis = <String, double>{};
+    for (final p in pembayaranList) {
+      final jenis = (p['kas_jenis'] as String?) ?? 'kas';
+      final nominal = (p['nominal'] as num?)?.toDouble() ?? 0;
+      totalPerJenis[jenis] = (totalPerJenis[jenis] ?? 0) + nominal;
+    }
+
+    if (totalPerJenis.isNotEmpty) {
+      final saldoSekarang = await getSaldoTerakhir();
+      final tanggalHariIni = DateTime.now().toIso8601String().substring(0, 10);
+      for (final entry in totalPerJenis.entries) {
+        final jenis = entry.key;
+        final nominal = entry.value;
+        if (nominal <= 0) continue;
+        final saldoBaru = (saldoSekarang[jenis] ?? 0) - nominal;
+        final data = <String, dynamic>{
+          'tanggal': tanggalHariIni,
+          'catatan': 'Pembatalan pembayaran (transaksi $noTransaksi dihapus)',
+        };
+        if (jenis == 'kas') { data['pengeluaran_kas'] = nominal; data['saldo_kas'] = saldoBaru; }
+        else if (jenis == 'vapor') { data['pengeluaran_vapor'] = nominal; data['saldo_kas_vapor'] = saldoBaru; }
+        else { data['pengeluaran_alat'] = nominal; data['saldo_kas_alat'] = saldoBaru; }
+        await db.insert('kas_keluar', data);
+        saldoSekarang[jenis] = saldoBaru; // biar reversal jenis berikutnya pakai saldo yg sudah terbaru
+      }
+    }
+
     await db.transaction((txn) async {
+      await txn.delete('pembayaran', where: 'transaksi_id = ?', whereArgs: [id]);
       await txn.delete('order_items', where: 'transaksi_id = ?', whereArgs: [id]);
       await txn.delete('transaksi', where: 'id = ?', whereArgs: [id]);
     });
-    final noTransaksi = header?['no_transaksi'] ?? '#$id';
-    final asal = header?['asal'] ?? '-';
-    await catatAudit('Menghapus transaksi $noTransaksi ($asal)');
+
+    final totalDibatalkan = totalPerJenis.values.fold<double>(0, (a, b) => a + b);
+    final keteranganPembayaran = totalDibatalkan > 0
+        ? ' — termasuk membatalkan pembayaran senilai Rp${totalDibatalkan.toStringAsFixed(0)} (saldo kas otomatis disesuaikan)'
+        : '';
+    await catatAudit('Menghapus transaksi $noTransaksi ($asal)$keteranganPembayaran');
   }
 
   Future<Map<String, dynamic>?> getOrderHeader(int id) async {

@@ -373,14 +373,22 @@ class _TransaksiPageState extends State<TransaksiPage> {
   // kepencet tidak sengaja. Setiap penghapusan otomatis tercatat di Audit
   // Log lewat DatabaseHelper.deleteOrder, jadi tetap bisa ditelusuri.
   Future<void> _konfirmasiHapus(Map<String, dynamic> t) async {
+    final id = t['id'] as int;
+    final histori = await DatabaseHelper.instance.getHistoriPembayaran(id);
+    final totalDibayar = histori.fold<double>(0, (a, p) => a + ((p['nominal'] as num?)?.toDouble() ?? 0));
+
+    final pesan = totalDibayar > 0
+        ? 'Transaksi #${t['no_transaksi'] ?? '-'} (${t['asal'] ?? '-'}) akan dihapus permanen beserta seluruh rincian barangnya.\n\n'
+            'Transaksi ini sudah tercatat ada pembayaran sebesar ${formatRupiah(totalDibayar)}. Riwayat pembayaran itu ikut dihapus dan saldo kas akan otomatis dikurangi sejumlah itu.\n\n'
+            'Tindakan ini tidak bisa dibatalkan.'
+        : 'Transaksi #${t['no_transaksi'] ?? '-'} (${t['asal'] ?? '-'}) akan dihapus permanen beserta seluruh rincian barangnya. '
+            'Tindakan ini tidak bisa dibatalkan.';
+
     final yakin = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Hapus Transaksi?'),
-        content: Text(
-          'Transaksi #${t['no_transaksi'] ?? '-'} (${t['asal'] ?? '-'}) akan dihapus permanen beserta seluruh rincian barangnya. '
-          'Tindakan ini tidak bisa dibatalkan.',
-        ),
+        content: Text(pesan),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
           FilledButton(
@@ -394,7 +402,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
     if (yakin != true) return;
 
     try {
-      await DatabaseHelper.instance.deleteOrder(t['id'] as int);
+      await DatabaseHelper.instance.deleteOrder(id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Transaksi #${t['no_transaksi'] ?? '-'} berhasil dihapus')),

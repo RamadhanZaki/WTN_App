@@ -13,6 +13,7 @@ class OrderFormPage extends StatefulWidget {
 
 class _OrderFormPageState extends State<OrderFormPage> {
   String noTransaksi = '';
+  final _noTransaksi = TextEditingController();
   DateTime tanggal = DateTime.now();
   final _asal = TextEditingController();
   String? motor;
@@ -50,6 +51,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
       final its = await DatabaseHelper.instance.getOrderItems(widget.orderId!);
       if (h != null) {
         noTransaksi = h['no_transaksi'] ?? '';
+        _noTransaksi.text = noTransaksi;
         tanggal = DateTime.tryParse(h['tanggal'] ?? '') ?? DateTime.now();
         _asal.text = h['asal'] ?? '';
         motor = h['motor'];
@@ -66,6 +68,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
       items = List<Map<String, dynamic>>.from(its);
     } else {
       noTransaksi = await DatabaseHelper.instance.generateNoTransaksi();
+      _noTransaksi.text = noTransaksi;
     }
     setState(() => loading = false);
   }
@@ -103,6 +106,27 @@ class _OrderFormPageState extends State<OrderFormPage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tambahkan minimal 1 barang')));
       return;
     }
+    final noTrxBaru = _noTransaksi.text.trim();
+    if (noTrxBaru.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No Transaksi tidak boleh kosong')));
+      return;
+    }
+    // Cek dobel: kalau No Transaksi diubah manual (mis. membetulkan nomor
+    // yang kadung dobel), pastikan nomor baru itu belum dipakai transaksi
+    // LAIN sebelum disimpan.
+    final sudahDipakai = await DatabaseHelper.instance.noTransaksiSudahDipakai(
+      noTrxBaru,
+      kecualiId: isEdit ? widget.orderId : null,
+    );
+    if (sudahDipakai) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No Transaksi "$noTrxBaru" sudah dipakai transaksi lain, pilih nomor lain')),
+        );
+      }
+      return;
+    }
+    noTransaksi = noTrxBaru;
     setState(() => saving = true);
 
     final header = {
@@ -150,7 +174,20 @@ class _OrderFormPageState extends State<OrderFormPage> {
         children: [
           _cardWrapper('Informasi Order', [
             Row(children: [
-              Expanded(child: _readonlyField('No ID Transaksi', noTransaksi)),
+              Expanded(
+                child: isEdit
+                    ? TextField(
+                        controller: _noTransaksi,
+                        decoration: const InputDecoration(
+                          labelText: 'No ID Transaksi',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          helperText: 'Ubah hanya jika nomor ini bentrok/dobel dengan transaksi lain',
+                          helperMaxLines: 2,
+                        ),
+                      )
+                    : _readonlyField('No ID Transaksi', noTransaksi),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: GestureDetector(
