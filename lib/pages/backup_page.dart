@@ -201,7 +201,13 @@ class _BackupPageState extends State<BackupPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // Cegah user keluar dari halaman ini (tombol/gesture back) selagi
+      // proses backup/restore/import sedang berjalan, supaya tidak ada
+      // halaman lain yang membuka koneksi database baru persis di saat
+      // file database sedang ditimpa (race condition).
+      canPop: !processing,
+      child: Scaffold(
       appBar: AppBar(title: const Text('Backup ke Google Drive'), actions: [
         IconButton(icon: const Icon(Icons.history), tooltip: 'Riwayat Backup', onPressed: _lihatRiwayatBackup),
       ]),
@@ -295,6 +301,7 @@ class _BackupPageState extends State<BackupPage> {
                 ),
               ],
             ),
+      ),
     );
   }
 }

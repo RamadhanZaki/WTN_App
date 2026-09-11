@@ -44,6 +44,9 @@ class LocalBackupService {
   // Membuka file picker sistem supaya user memilih file .db dari
   // penyimpanan HP (Downloads, Google Drive lokal, dll), memvalidasi bahwa
   // itu benar file SQLite, lalu menimpa database aplikasi dengan file itu.
+  // Sama seperti restoreDariDrive(): file sumber disalin ke file SEMENTARA
+  // dulu, divalidasi, baru ditimpa lewat rename atomik + cadangan otomatis
+  // -- database aktif TIDAK pernah dalam kondisi "sedang ditulis separuh".
   Future<void> importDariFile() async {
     // Sejak file_picker v11, akses lewat FilePicker.platform.pickFiles(...)
     // sudah dihapus — dipanggil langsung lewat method static FilePicker.pickFiles(...).
@@ -69,7 +72,14 @@ class LocalBackupService {
     }
 
     final tujuanPath = await _dbPath();
+    final tempPath = '$tujuanPath.import_tmp';
+    final tempFile = await sumberFile.copy(tempPath);
+
     await DatabaseHelper.instance.tutupDatabase();
-    await sumberFile.copy(tujuanPath);
+    final fileLama = File(tujuanPath);
+    if (await fileLama.exists()) {
+      await fileLama.copy('$tujuanPath.sebelum_import.bak');
+    }
+    await tempFile.rename(tujuanPath);
   }
 }

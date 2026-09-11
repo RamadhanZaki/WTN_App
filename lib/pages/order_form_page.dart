@@ -497,15 +497,23 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
 
   Future<void> _pilihSaran(Map<String, dynamic> s) async {
     final nama = s['nama_barang'] as String;
-    // Prioritas harga otomatis: kombinasi Type Motor + Barang + Proses.
-    // Kalau kombinasi itu belum pernah dipakai, fallback ke harga_terakhir
-    // per-nama-barang saja (katalog_barang), seperti sebelumnya.
+    // Prioritas harga otomatis:
+    // 1) kombinasi Type Motor + Barang + Proses (harga_kombinasi) — paling
+    //    akurat karena berasal dari transaksi sungguhan.
+    // 2) harga acuan Type Motor + Barang dari katalog yang dikurasi manual
+    //    (katalog_barang_motor) — dipakai kalau kombinasi di atas belum
+    //    pernah ada (barang baru terdaftar tapi belum pernah ditransaksikan).
+    // 3) harga_terakhir per-nama-barang saja (katalog_barang), seperti semula.
     final hargaKombinasi = await DatabaseHelper.instance.cariHargaKombinasi(
       widget.motor ?? '', nama, widget.proses ?? '',
     );
+    double? hargaAcuanMotor;
+    if (hargaKombinasi == null && widget.motor != null && widget.motor!.trim().isNotEmpty) {
+      hargaAcuanMotor = await DatabaseHelper.instance.cariHargaAcuanMotor(widget.motor!, nama);
+    }
     setState(() {
       _barang.text = nama;
-      hargaDariDaftar = hargaKombinasi ?? (s['harga_terakhir'] as num?)?.toDouble();
+      hargaDariDaftar = hargaKombinasi ?? hargaAcuanMotor ?? (s['harga_terakhir'] as num?)?.toDouble();
       pakaiHargaManual = hargaDariDaftar == null;
       saran = [];
     });
@@ -570,7 +578,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       child: Text(
-                        'Belum ada histori barang ini untuk Type Motor "${widget.motor}"',
+                        'Belum ada barang cocok di histori maupun katalog Type Motor "${widget.motor}"',
                         style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
                       ),
                     ),

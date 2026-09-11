@@ -44,7 +44,7 @@ class DatabaseHelper {
   // Versi skema saat ini. Naikkan angka ini setiap kali menambah migrasi baru
   // di dalam _migrasi() agar migrasi lama otomatis di-skip pada app yang sudah
   // pernah dibuka sebelumnya.
-  static const int _dbVersion = 9;
+  static const int _dbVersion = 10;
 
   Future<void> _migrasi(Database db) async {
     // Skip seluruh proses migrasi kalau versi skema sudah paling baru.
@@ -402,6 +402,26 @@ class DatabaseHelper {
         keterangan TEXT
       )
     ''');
+
+    // v10: "Kelola Katalog Barang per Type Motor" — daftar Barang/Part yang
+    // SENGAJA dikurasi manual per Type Motor (beda dari `harga_kombinasi`
+    // yang otomatis terbentuk dari histori transaksi). Tujuannya supaya
+    // saran barang untuk suatu motor tetap muncul walau motor itu belum
+    // pernah punya transaksi sama sekali ("cold start"). Harga di sini
+    // sifatnya harga ACUAN (motor + barang saja, tanpa proses) — cuma
+    // patokan awal; begitu ada transaksi sungguhan, harga_kombinasi (yang
+    // sudah memperhitungkan proses) tetap jadi prioritas utama.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS katalog_barang_motor (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        motor TEXT NOT NULL,
+        nama_barang TEXT NOT NULL,
+        harga_acuan REAL,
+        aktif INTEGER DEFAULT 1
+      )
+    ''');
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_katalog_barang_motor_unique ON katalog_barang_motor(motor, nama_barang)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_katalog_barang_motor_motor ON katalog_barang_motor(motor)');
 
     await db.insert('pengaturan', {'key': 'db_version', 'value': _dbVersion.toString()}, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -1189,7 +1209,9 @@ class DatabaseHelper {
     if (q.isEmpty) return [];
 
     if (motor != null && motor.trim().isNotEmpty) {
-      return await db.rawQuery('''
+      // Prioritas 1: histori transaksi sungguhan (harga_kombinasi) — harga
+      // paling akurat karena sudah memperhitungkan proses juga.
+      final dariHistori = await db.rawQuery('''
         SELECT barang as nama_barang, harga as harga_terakhir, MAX(updated_at) as _terbaru
         FROM harga_kombinasi
         WHERE motor = ? COLLATE NOCASE AND barang LIKE ? AND harga IS NOT NULL
@@ -1197,6 +1219,27 @@ class DatabaseHelper {
         ORDER BY barang ASC
         LIMIT 8
       ''', [motor.trim(), '%$q%']);
+
+      // Prioritas 2: katalog yang dikurasi manual per Type Motor (Kelola
+      // Katalog Barang per Type Motor) — dipakai untuk barang yang SUDAH
+      // didaftarkan admin tapi BELUM pernah ada transaksinya (cold start),
+      // supaya tetap muncul sebagai saran sebelum transaksi pertama terjadi.
+      final sudahAda = dariHistori.map((r) => (r['nama_barang'] as String).toLowerCase()).toSet();
+      final dariKuratsi = await db.query(
+        'katalog_barang_motor',
+        columns: ['nama_barang', 'harga_acuan as harga_terakhir'],
+        where: 'motor = ? COLLATE NOCASE AND nama_barang LIKE ? AND aktif = 1',
+        whereArgs: [motor.trim(), '%$q%'],
+        orderBy: 'nama_barang ASC',
+        limit: 8,
+      );
+
+      final gabungan = [
+        ...dariHistori,
+        ...dariKuratsi.where((r) => !sudahAda.contains((r['nama_barang'] as String).toLowerCase())),
+      ];
+      gabungan.sort((a, b) => (a['nama_barang'] as String).compareTo(b['nama_barang'] as String));
+      return gabungan.take(8).toList();
     }
 
     return await db.query(
@@ -1315,6 +1358,115 @@ class DatabaseHelper {
         });
       }
       await db.update('harga_kombinasi', {'harga': harga, 'updated_at': now}, where: 'id = ?', whereArgs: [existing.first['id']]);
+    }
+  }
+
+  // ---------- KATALOG BARANG PER TYPE MOTOR (kurasi manual, "Kelola Katalog
+  // Barang per Type Motor") ----------
+  // Beda dengan `harga_kombinasi` (otomatis dari histori transaksi, per
+  // motor+barang+PROSES) dan `katalog_barang` (daftar nama global, tidak
+  // terikat motor). Tabel ini khusus untuk admin mengurasi barang standar
+  // apa saja yang berlaku untuk suatu Type Motor, lengkap dengan harga
+  // ACUAN (motor+barang saja, TANPA proses) sebagai patokan awal sebelum
+  // ada transaksi sungguhan. Sifatnya PANDUAN, bukan pembatas — staf tetap
+  // bebas menambah barang baru yang belum terdaftar di sini saat mengisi
+  // order (lihat opsi "Tambah Barang Baru" di form Tambah Barang).
+
+  Future<List<Map<String, dynamic>>> getKatalogBarangMotor(String motor, {bool termasukNonaktif = false}) async {
+    final db = await database;
+    if (termasukNonaktif) {
+      return await db.query(
+        'katalog_barang_motor',
+        where: 'motor = ? COLLATE NOCASE',
+        whereArgs: [motor.trim()],
+        orderBy: 'aktif DESC, nama_barang ASC',
+      );
+    }
+    return await db.query(
+      'katalog_barang_motor',
+      where: 'motor = ? COLLATE NOCASE AND aktif = 1',
+      whereArgs: [motor.trim()],
+      orderBy: 'nama_barang ASC',
+    );
+  }
+
+  // Dipakai form Tambah Barang sebagai fallback harga kalau kombinasi
+  // motor+barang+proses di harga_kombinasi belum pernah ada.
+  Future<double?> cariHargaAcuanMotor(String motor, String barang) async {
+    final db = await database;
+    final r = await db.query(
+      'katalog_barang_motor',
+      where: 'motor = ? COLLATE NOCASE AND nama_barang = ? COLLATE NOCASE',
+      whereArgs: [motor.trim(), barang.trim()],
+    );
+    if (r.isEmpty || r.first['harga_acuan'] == null) return null;
+    return (r.first['harga_acuan'] as num).toDouble();
+  }
+
+  Future<int> insertKatalogBarangMotor(String motor, String namaBarang, double? hargaAcuan) async {
+    final db = await database;
+    final ada = await db.query(
+      'katalog_barang_motor',
+      where: 'motor = ? COLLATE NOCASE AND nama_barang = ? COLLATE NOCASE',
+      whereArgs: [motor.trim(), namaBarang.trim()],
+    );
+    if (ada.isNotEmpty) {
+      // Sudah ada (mungkin sebelumnya dinonaktifkan) -> aktifkan lagi &
+      // perbarui harga acuannya, daripada bikin baris duplikat.
+      final id = ada.first['id'] as int;
+      await db.update('katalog_barang_motor', {'harga_acuan': hargaAcuan, 'aktif': 1}, where: 'id = ?', whereArgs: [id]);
+      await catatAudit('Memperbarui katalog barang "$namaBarang" untuk motor "$motor"');
+      return id;
+    }
+    final id = await db.insert('katalog_barang_motor', {
+      'motor': motor.trim(),
+      'nama_barang': namaBarang.trim(),
+      'harga_acuan': hargaAcuan,
+      'aktif': 1,
+    });
+    await catatAudit('Menambah barang "$namaBarang" ke katalog Type Motor "$motor"');
+    return id;
+  }
+
+  Future<void> updateKatalogBarangMotor(int id, String namaBarang, double? hargaAcuan) async {
+    final db = await database;
+    await db.update(
+      'katalog_barang_motor',
+      {'nama_barang': namaBarang.trim(), 'harga_acuan': hargaAcuan},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await catatAudit('Mengubah barang katalog motor menjadi "$namaBarang"');
+  }
+
+  Future<void> toggleAktifKatalogBarangMotor(int id, bool aktif) async {
+    final db = await database;
+    await db.update('katalog_barang_motor', {'aktif': aktif ? 1 : 0}, where: 'id = ?', whereArgs: [id]);
+    await catatAudit('Mengubah status ${aktif ? "Aktif" : "Nonaktif"} barang katalog motor');
+  }
+
+  // Hard delete kalau belum pernah dipakai transaksi sungguhan untuk motor
+  // itu; kalau sudah pernah, cukup nonaktifkan (transaksi lama tetap aman).
+  Future<bool> deleteKatalogBarangMotor(int id) async {
+    final db = await database;
+    final rowList = await db.query('katalog_barang_motor', where: 'id = ?', whereArgs: [id]);
+    if (rowList.isEmpty) return true;
+    final motor = rowList.first['motor'] as String;
+    final nama = rowList.first['nama_barang'] as String;
+    final r = await db.rawQuery('''
+      SELECT COUNT(*) as c FROM order_items oi
+      JOIN transaksi t ON t.id = oi.transaksi_id
+      WHERE t.motor = ? COLLATE NOCASE AND oi.barang = ? COLLATE NOCASE
+    ''', [motor, nama]);
+    final dipakai = ((r.first['c'] as int?) ?? 0) > 0;
+    if (dipakai) {
+      await db.update('katalog_barang_motor', {'aktif': 0}, where: 'id = ?', whereArgs: [id]);
+      await catatAudit('Menonaktifkan barang "$nama" di katalog motor "$motor" (sudah dipakai transaksi)');
+      return false;
+    } else {
+      await db.delete('katalog_barang_motor', where: 'id = ?', whereArgs: [id]);
+      await catatAudit('Menghapus barang "$nama" dari katalog motor "$motor"');
+      return true;
     }
   }
 

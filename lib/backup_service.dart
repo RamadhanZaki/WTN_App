@@ -127,9 +127,19 @@ class BackupService {
   }
 
   // Download backup terbaru dari Drive dan menimpa database lokal.
-  // Koneksi database ditutup TERLEBIH DAHULU sebelum file ditimpa, supaya
-  // tidak terjadi race condition antara penulisan file baru dengan koneksi
-  // SQLite lama yang masih terbuka.
+  // AMAN dari 2 celah race condition:
+  //  1) Non-atomic write: download ditulis ke file SEMENTARA dulu (bukan
+  //     langsung ke path database aktif). Kalau internet putus/app ke-kill
+  //     di tengah jalan, file database yang sedang dipakai TIDAK tersentuh
+  //     sama sekali -- gagal dengan aman, bukan korup.
+  //  2) Koneksi baru terbuka di tengah proses (mis. user pindah halaman
+  //     saat restore masih jalan): database aktif baru ditimpa lewat
+  //     RENAME atomik di detik terakhir (setelah file sementara selesai &
+  //     tervalidasi) -- bukan ditulis langsung dari stream network yang
+  //     bisa berlangsung lama, jadi TIDAK ada jendela waktu file dalam
+  //     kondisi "sedang ditulis separuh".
+  // Salinan database lama juga disimpan sebagai `.sebelum_restore.bak`
+  // sebagai jaring pengaman kalau file backup dari Drive ternyata rusak.
   Future<void> restoreDariDrive() async {
     final api = await _driveApi();
     final folderId = await _cariAtauBuatFolder(api);
@@ -143,21 +153,40 @@ class BackupService {
       downloadOptions: drive.DownloadOptions.fullMedia,
     ) as drive.Media;
 
-    // Tutup koneksi database LEBIH DULU sebelum file-nya ditimpa, supaya
-    // tidak ada koneksi SQLite yang masih aktif/mengunci file lama saat
-    // proses penulisan file baru berlangsung (race condition: kalau file
-    // ditimpa sementara koneksi lama masih terbuka, hasilnya bisa file
-    // korup atau koneksi lama tetap membaca cache/data basi).
-    await DatabaseHelper.instance.tutupDatabase();
-
     final path = await _dbPath();
-    final file = File(path);
-    final sink = file.openWrite();
+    final tempPath = '$path.restore_tmp';
+    final tempFile = File(tempPath);
+    if (await tempFile.exists()) await tempFile.delete();
+
+    // 1) Download ke file SEMENTARA -- path database aktif belum disentuh.
+    final sink = tempFile.openWrite();
     try {
       await media.stream.pipe(sink);
     } finally {
       await sink.close();
     }
+
+    // 2) Validasi: pastikan file yang baru didownload benar-benar SQLite
+    //    yang valid sebelum dipakai menimpa apa pun.
+    final raf = await tempFile.open();
+    final header = await raf.read(16);
+    await raf.close();
+    if (!String.fromCharCodes(header).startsWith('SQLite format 3')) {
+      await tempFile.delete();
+      throw Exception('File backup dari Drive tidak valid/rusak, database lokal TIDAK diubah');
+    }
+
+    // 3) Tutup koneksi lama, simpan cadangan file lama, baru timpa dengan
+    //    file sementara yang sudah tervalidasi lewat rename (bukan copy).
+    //    Rename ke path tujuan yang ada di direktori sama = 1 operasi atomik
+    //    di level sistem file, jadi TIDAK ada jendela waktu di mana file
+    //    database dalam kondisi "sedang ditulis separuh" sama sekali.
+    await DatabaseHelper.instance.tutupDatabase();
+    final fileLama = File(path);
+    if (await fileLama.exists()) {
+      await fileLama.copy('$path.sebelum_restore.bak');
+    }
+    await tempFile.rename(path);
     // Setelah ini, akses berikutnya ke DatabaseHelper.instance.database akan
     // otomatis membuka ulang koneksi baru dari file database yang baru saja
     // dipulihkan (lazy re-init di getter `database`).

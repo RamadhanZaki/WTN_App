@@ -6,6 +6,7 @@ import 'backup_page.dart';
 import 'laporan_page.dart';
 import 'audit_log_page.dart';
 import 'export_page.dart';
+import 'katalog_barang_motor_page.dart';
 
 class LainnyaPage extends StatefulWidget {
   const LainnyaPage({super.key});
@@ -93,6 +94,12 @@ class _LainnyaPageState extends State<LainnyaPage> {
           ListTile(leading: const Icon(Icons.palette), title: const Text('Kelola Warna Cat'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_warna_cat', title: 'Warna Cat')))),
           ListTile(leading: const Icon(Icons.brush), title: const Text('Kelola Warna Lis'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_warna_lis', title: 'Warna Lis')))),
           ListTile(leading: const Icon(Icons.build), title: const Text('Kelola Jenis Proses'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_proses', title: 'Jenis Proses')))),
+          ListTile(
+            leading: const Icon(Icons.inventory_2),
+            title: const Text('Kelola Katalog Barang per Type Motor'),
+            subtitle: const Text('Daftar Barang/Part standar + harga acuan tiap Type Motor'),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KatalogBarangMotorPage())),
+          ),
           const Divider(),
           ListTile(leading: const Icon(Icons.history_edu), title: const Text('Riwayat Aktivitas'), subtitle: const Text('Audit log semua aksi penting'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditLogPage()))),
         ],
