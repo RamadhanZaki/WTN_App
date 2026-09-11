@@ -44,7 +44,7 @@ class DatabaseHelper {
   // Versi skema saat ini. Naikkan angka ini setiap kali menambah migrasi baru
   // di dalam _migrasi() agar migrasi lama otomatis di-skip pada app yang sudah
   // pernah dibuka sebelumnya.
-  static const int _dbVersion = 8;
+  static const int _dbVersion = 9;
 
   Future<void> _migrasi(Database db) async {
     // Skip seluruh proses migrasi kalau versi skema sudah paling baru.
@@ -661,11 +661,14 @@ class DatabaseHelper {
     required List<Map<String, dynamic>> items,
   }) async {
     final db = await database;
-    final id = await db.insert('transaksi', header);
-    for (final item in items) {
-      item['transaksi_id'] = id;
-      await db.insert('order_items', item);
-    }
+    late final int id;
+    await db.transaction((txn) async {
+      id = await txn.insert('transaksi', header);
+      for (final item in items) {
+        final itemBaru = Map<String, dynamic>.from(item)..['transaksi_id'] = id;
+        await txn.insert('order_items', itemBaru);
+      }
+    });
     await catatAudit('Membuat transaksi baru ${header['no_transaksi'] ?? '#$id'} (${header['asal'] ?? '-'})');
     return id;
   }
@@ -676,12 +679,14 @@ class DatabaseHelper {
     required List<Map<String, dynamic>> items,
   }) async {
     final db = await database;
-    await db.update('transaksi', header, where: 'id = ?', whereArgs: [id]);
-    await db.delete('order_items', where: 'transaksi_id = ?', whereArgs: [id]);
-    for (final item in items) {
-      item['transaksi_id'] = id;
-      await db.insert('order_items', item);
-    }
+    await db.transaction((txn) async {
+      await txn.update('transaksi', header, where: 'id = ?', whereArgs: [id]);
+      await txn.delete('order_items', where: 'transaksi_id = ?', whereArgs: [id]);
+      for (final item in items) {
+        final itemBaru = Map<String, dynamic>.from(item)..['transaksi_id'] = id;
+        await txn.insert('order_items', itemBaru);
+      }
+    });
     await catatAudit('Mengubah transaksi ${header['no_transaksi'] ?? '#$id'}');
   }
 
@@ -739,7 +744,7 @@ class DatabaseHelper {
       SELECT t.*,
         (SELECT GROUP_CONCAT(barang, ', ') FROM order_items WHERE transaksi_id = t.id) as daftar_barang,
         (SELECT COUNT(*) FROM order_items WHERE transaksi_id = t.id) as jumlah_item,
-        (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+        (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
       FROM transaksi t
       WHERE t.tanggal >= ? AND t.tanggal < ?
         AND (t.asal LIKE ? OR t.motor LIKE ? OR EXISTS (
@@ -813,7 +818,7 @@ class DatabaseHelper {
       SELECT t.*,
         (SELECT GROUP_CONCAT(barang, ', ') FROM order_items WHERE transaksi_id = t.id) as daftar_barang,
         (SELECT COUNT(*) FROM order_items WHERE transaksi_id = t.id) as jumlah_item,
-        (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+        (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
       FROM transaksi t
       $whereClause
       ORDER BY t.tanggal DESC, t.id DESC
@@ -827,7 +832,7 @@ class DatabaseHelper {
         (SELECT GROUP_CONCAT(barang, ', ') FROM order_items WHERE transaksi_id = t.id) as daftar_barang,
         (SELECT GROUP_CONCAT(warna_cat, ', ') FROM order_items WHERE transaksi_id = t.id) as daftar_warna_cat,
         (SELECT GROUP_CONCAT(warna_lis, ', ') FROM order_items WHERE transaksi_id = t.id AND warna_lis IS NOT NULL AND warna_lis != '') as daftar_warna_lis,
-        (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+        (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
       FROM transaksi t
       ORDER BY t.tanggal DESC, t.id DESC
       LIMIT ?
@@ -870,7 +875,7 @@ class DatabaseHelper {
       // juga snapshot keseluruhan (bukan dibatasi bulan).
       db.rawQuery('''
         SELECT t.id as id, t.total_dibayar as total_dibayar,
-          (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+          (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
         FROM transaksi t WHERE t.status_pembayaran = 'piutang'
       '''),
       // Pengeluaran bulan berjalan (sesuai periode yang dipilih), dari ketiga
@@ -1362,7 +1367,7 @@ class DatabaseHelper {
       ''', [awal, akhirEksklusif]),
       db.rawQuery('''
         SELECT t.id as id, t.total_dibayar as total_dibayar,
-          (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+          (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
         FROM transaksi t WHERE t.status_pembayaran = 'piutang'
       '''),
       getSaldoTerakhir(),
@@ -1401,7 +1406,7 @@ class DatabaseHelper {
     // konsisten di semua halaman (dan di Export Laporan) untuk periode yang sama.
     final results = await Future.wait([
       db.rawQuery('''
-        SELECT t.*, (SELECT SUM(harga) FROM order_items WHERE transaksi_id = t.id) as total_harga
+        SELECT t.*, (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
         FROM transaksi t WHERE t.tanggal >= ? AND t.tanggal < ?
       ''', [awal, akhirEksklusif]),
       db.rawQuery('''

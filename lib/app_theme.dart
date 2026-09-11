@@ -71,7 +71,9 @@ class AppColors {
 }
 
 String formatRupiah(dynamic value, {bool withRp = true}) {
-  final n = (value ?? 0) is num ? (value as num) : (double.tryParse(value.toString()) ?? 0);
+  final n = value == null
+      ? 0
+      : (value is num ? value : (double.tryParse(value.toString()) ?? 0));
   final s = n.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.');
   return withRp ? 'Rp$s' : s;
 }

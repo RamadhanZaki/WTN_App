@@ -63,7 +63,7 @@ class _OrderFormPageState extends State<OrderFormPage> {
         _kasMaintenance.text = h['kas_maintenance'] != null ? formatRupiah(h['kas_maintenance'], withRp: false) : '';
         _catatan.text = h['catatan'] ?? '';
       }
-      items = its;
+      items = List<Map<String, dynamic>>.from(its);
     } else {
       noTransaksi = await DatabaseHelper.instance.generateNoTransaksi();
     }
