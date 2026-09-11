@@ -38,6 +38,13 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
     _initFilterRiwayat();
   }
 
+  @override
+  void dispose() {
+    _nominal.dispose();
+    _catatan.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => loading = true);
     final s = await DatabaseHelper.instance.getSaldoTerakhir();

@@ -42,6 +42,20 @@ class _OrderFormPageState extends State<OrderFormPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _noTransaksi.dispose();
+    _asal.dispose();
+    _langgeng.dispose();
+    _juki.dispose();
+    _rio.dispose();
+    _kas.dispose();
+    _kasVapor.dispose();
+    _kasMaintenance.dispose();
+    _catatan.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     masterMotor = await DatabaseHelper.instance.getMaster('master_motor');
     masterProses = await DatabaseHelper.instance.getMaster('master_proses');
@@ -399,6 +413,10 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _barang.dispose();
+    _kode.dispose();
+    _hargaManual.dispose();
+    _qty.dispose();
     super.dispose();
   }
 
