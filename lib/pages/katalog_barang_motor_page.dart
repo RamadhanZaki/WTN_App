@@ -122,7 +122,7 @@ class _KatalogBarangMotorPageState extends State<KatalogBarangMotorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kelola Katalog Barang per Type Motor'),
+        title: const Text('Kelola Katalog Barang'),
         actions: [
           IconButton(
             icon: const Icon(Icons.add),

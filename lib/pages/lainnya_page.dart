@@ -96,8 +96,7 @@ class _LainnyaPageState extends State<LainnyaPage> {
           ListTile(leading: const Icon(Icons.build), title: const Text('Kelola Jenis Proses'), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MasterDataEditorPage(table: 'master_proses', title: 'Jenis Proses')))),
           ListTile(
             leading: const Icon(Icons.inventory_2),
-            title: const Text('Kelola Katalog Barang per Type Motor'),
-            subtitle: const Text('Daftar Barang/Part standar + harga acuan tiap Type Motor'),
+            title: const Text('Kelola Katalog Barang'),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const KatalogBarangMotorPage())),
           ),
           const Divider(),
