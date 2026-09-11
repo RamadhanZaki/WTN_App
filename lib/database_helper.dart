@@ -684,19 +684,92 @@ class DatabaseHelper {
     return 'TRX-${n.toString().padLeft(5, '0')}';
   }
 
+  // Total dari SEMUA field Pembagian & Kas di form order (Langgeng + Juki +
+  // Rio + Kas + Kas Vapor + Kas Maintenance) -- ini yang dianggap sebagai
+  // "total uang yang sudah diterima dari customer" (total_dibayar), sejak
+  // tombol "Tambah Pembayaran" terpisah dihapus dan digantikan dengan
+  // mengisi/mengedit langsung form Pembagian & Kas ini.
+  double _totalPembagianDanKas(Map<String, dynamic> header) {
+    double v(String key) => (header[key] as num?)?.toDouble() ?? 0;
+    return v('bagian_langgeng') + v('bagian_juki') + v('bagian_rio') + v('kas') + v('kas_vapor') + v('kas_maintenance');
+  }
+
+  // Membandingkan nilai Kas (kas/kas_vapor/kas_maintenance) yang baru
+  // terhadap yang lama, lalu mencatat SELISIHNYA (delta) sebagai baris
+  // kas_keluar per jenis kas -- supaya saldo kas & histori per tanggal
+  // tetap akurat walau user cuma mengedit angka di form Pembagian & Kas
+  // (bukan lewat tombol "Tambah Pembayaran" yang sudah dihapus).
+  // Bagian pekerja (Langgeng/Juki/Rio) SENGAJA tidak menyentuh saldo kas,
+  // karena uangnya diasumsikan langsung diberikan ke pekerja saat itu juga,
+  // tidak disimpan dulu di kas perusahaan.
+  Future<void> _catatDeltaKas({
+    required Map<String, double> lama,
+    required Map<String, double> baru,
+    required String noTransaksi,
+  }) async {
+    final db = await database;
+    final saldoSekarang = await getSaldoTerakhir();
+    final tanggalHariIni = DateTime.now().toIso8601String().substring(0, 10);
+
+    for (final jenis in ['kas', 'vapor', 'alat']) {
+      final nilaiLama = lama[jenis] ?? 0;
+      final nilaiBaru = baru[jenis] ?? 0;
+      final delta = nilaiBaru - nilaiLama;
+      if (delta == 0) continue;
+
+      final saldoBaru = (saldoSekarang[jenis] ?? 0) + delta;
+      final data = <String, dynamic>{
+        'tanggal': tanggalHariIni,
+        'catatan': 'Penyesuaian pembagian & kas $noTransaksi',
+      };
+      final nominal = delta.abs();
+      if (delta > 0) {
+        if (jenis == 'kas') { data['pemasukan_kas'] = nominal; data['saldo_kas'] = saldoBaru; }
+        else if (jenis == 'vapor') { data['pemasukan_vapor'] = nominal; data['saldo_kas_vapor'] = saldoBaru; }
+        else { data['pemasukan_alat'] = nominal; data['saldo_kas_alat'] = saldoBaru; }
+      } else {
+        if (jenis == 'kas') { data['pengeluaran_kas'] = nominal; data['saldo_kas'] = saldoBaru; }
+        else if (jenis == 'vapor') { data['pengeluaran_vapor'] = nominal; data['saldo_kas_vapor'] = saldoBaru; }
+        else { data['pengeluaran_alat'] = nominal; data['saldo_kas_alat'] = saldoBaru; }
+      }
+      await db.insert('kas_keluar', data);
+      saldoSekarang[jenis] = saldoBaru; // biar delta jenis berikutnya pakai saldo yg sudah terbaru
+    }
+  }
+
   Future<int> insertOrder({
     required Map<String, dynamic> header,
     required List<Map<String, dynamic>> items,
   }) async {
     final db = await database;
+    final totalHarga = _hitungTotalHarga(items);
+    final totalDibayarBaru = _totalPembagianDanKas(header);
+    final statusBaru = hitungStatusPembayaran(totalDibayarBaru, totalHarga, 'belum_diambil');
+    final headerLengkap = Map<String, dynamic>.from(header)
+      ..['total_dibayar'] = totalDibayarBaru
+      ..['status_pembayaran'] = statusBaru;
+
     late final int id;
     await db.transaction((txn) async {
-      id = await txn.insert('transaksi', header);
+      id = await txn.insert('transaksi', headerLengkap);
       for (final item in items) {
         final itemBaru = Map<String, dynamic>.from(item)..['transaksi_id'] = id;
         await txn.insert('order_items', itemBaru);
       }
     });
+
+    // Order baru: nilai kas "lama" dianggap 0 semua, jadi delta = nilai kas
+    // yang baru diisi di form (kalau langsung diisi Lunas/DP saat create).
+    await _catatDeltaKas(
+      lama: const {'kas': 0, 'vapor': 0, 'alat': 0},
+      baru: {
+        'kas': (header['kas'] as num?)?.toDouble() ?? 0,
+        'vapor': (header['kas_vapor'] as num?)?.toDouble() ?? 0,
+        'alat': (header['kas_maintenance'] as num?)?.toDouble() ?? 0,
+      },
+      noTransaksi: header['no_transaksi'] ?? '#$id',
+    );
+
     await catatAudit('Membuat transaksi baru ${header['no_transaksi'] ?? '#$id'} (${header['asal'] ?? '-'})');
     return id;
   }
@@ -707,14 +780,39 @@ class DatabaseHelper {
     required List<Map<String, dynamic>> items,
   }) async {
     final db = await database;
+    final headerLama = await getOrderHeader(id);
+
+    final totalHarga = _hitungTotalHarga(items);
+    final totalDibayarBaru = _totalPembagianDanKas(header);
+    final statusPengambilan = (headerLama?['status_pengambilan'] as String?) ?? 'belum_diambil';
+    final statusBaru = hitungStatusPembayaran(totalDibayarBaru, totalHarga, statusPengambilan);
+    final headerLengkap = Map<String, dynamic>.from(header)
+      ..['total_dibayar'] = totalDibayarBaru
+      ..['status_pembayaran'] = statusBaru;
+
     await db.transaction((txn) async {
-      await txn.update('transaksi', header, where: 'id = ?', whereArgs: [id]);
+      await txn.update('transaksi', headerLengkap, where: 'id = ?', whereArgs: [id]);
       await txn.delete('order_items', where: 'transaksi_id = ?', whereArgs: [id]);
       for (final item in items) {
         final itemBaru = Map<String, dynamic>.from(item)..['transaksi_id'] = id;
         await txn.insert('order_items', itemBaru);
       }
     });
+
+    await _catatDeltaKas(
+      lama: {
+        'kas': (headerLama?['kas'] as num?)?.toDouble() ?? 0,
+        'vapor': (headerLama?['kas_vapor'] as num?)?.toDouble() ?? 0,
+        'alat': (headerLama?['kas_maintenance'] as num?)?.toDouble() ?? 0,
+      },
+      baru: {
+        'kas': (header['kas'] as num?)?.toDouble() ?? 0,
+        'vapor': (header['kas_vapor'] as num?)?.toDouble() ?? 0,
+        'alat': (header['kas_maintenance'] as num?)?.toDouble() ?? 0,
+      },
+      noTransaksi: header['no_transaksi'] ?? '#$id',
+    );
+
     await catatAudit('Mengubah transaksi ${header['no_transaksi'] ?? '#$id'}');
   }
 

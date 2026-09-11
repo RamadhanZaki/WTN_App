@@ -102,72 +102,6 @@ class _DetailTransaksiPageState extends State<DetailTransaksiPage> {
     }
   }
 
-  Future<void> _tambahPembayaran() async {
-    if (sisa <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transaksi ini sudah Lunas')));
-      return;
-    }
-    final nominalC = TextEditingController();
-    final catatanC = TextEditingController();
-    String kasJenis = 'kas';
-
-    final hasil = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Tambah Pembayaran'),
-          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Sisa tagihan: ${formatRupiah(sisa)}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-            const SizedBox(height: 10),
-            TextField(
-              controller: nominalC,
-              keyboardType: TextInputType.number,
-              inputFormatters: [RupiahInputFormatter()],
-              decoration: const InputDecoration(labelText: 'Nominal Dibayar', border: OutlineInputBorder(), isDense: true),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: kasJenis,
-              decoration: const InputDecoration(labelText: 'Masuk ke Kas', border: OutlineInputBorder(), isDense: true),
-              items: const [
-                DropdownMenuItem(value: 'kas', child: Text('KAS Umum')),
-                DropdownMenuItem(value: 'vapor', child: Text('KAS Vapor')),
-                DropdownMenuItem(value: 'alat', child: Text('KAS Maintenance')),
-              ],
-              onChanged: (v) => setDialogState(() => kasJenis = v ?? 'kas'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: catatanC,
-              decoration: const InputDecoration(labelText: 'Catatan (opsional)', border: OutlineInputBorder(), isDense: true),
-            ),
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Simpan')),
-          ],
-        ),
-      ),
-    );
-
-    if (hasil == true) {
-      final nominal = parseRupiah(nominalC.text);
-      if (nominal <= 0) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nominal harus lebih dari 0')));
-        return;
-      }
-      await DatabaseHelper.instance.tambahPembayaran(
-        transaksiId: widget.orderId,
-        nominal: nominal,
-        tanggal: DateTime.now().toIso8601String().substring(0, 10),
-        catatan: catatanC.text.trim(),
-        kasJenis: kasJenis,
-      );
-      await _load();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pembayaran tersimpan')));
-    }
-  }
-
   void _bagikan() {
     final d = data;
     if (d == null) return;
@@ -285,7 +219,10 @@ class _DetailTransaksiPageState extends State<DetailTransaksiPage> {
             ]),
             const SizedBox(height: 10),
             if (pembayaranList.isNotEmpty) ...[
-              const Text('Histori Pembayaran', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              // Histori dari sistem pembayaran lama (sebelum "Tambah
+              // Pembayaran" dihapus) -- tetap ditampilkan sebagai arsip,
+              // tapi tidak ada lagi entri baru yang masuk ke sini.
+              const Text('Histori Pembayaran (Lama)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
               const SizedBox(height: 6),
               ...pembayaranList.map((p) => Card(
                     margin: const EdgeInsets.only(bottom: 6),
@@ -298,10 +235,19 @@ class _DetailTransaksiPageState extends State<DetailTransaksiPage> {
                   )),
               const SizedBox(height: 8),
             ],
-            OutlinedButton.icon(
-              onPressed: _tambahPembayaran,
-              icon: const Icon(Icons.add),
-              label: const Text('Tambah Pembayaran'),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Icon(Icons.info_outline, size: 18, color: Colors.grey.shade600),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Untuk mencatat/mengubah pembayaran, buka tombol Edit lalu isi form Pembagian & KAS.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
+              ]),
             ),
             if ((d['catatan'] as String?)?.isNotEmpty == true) ...[
               const SizedBox(height: 20),

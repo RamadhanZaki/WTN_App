@@ -89,6 +89,27 @@ class _OrderFormPageState extends State<OrderFormPage> {
 
   double get totalHarga => items.fold(0.0, (sum, it) => sum + ((it['harga'] as num?)?.toDouble() ?? 0));
 
+  // Total dari semua field Pembagian & Kas yang sedang diisi user saat ini
+  // (belum disimpan) -- dipakai buat preview status pembayaran & validasi,
+  // supaya user langsung lihat efeknya sebelum menekan Simpan.
+  double get _totalPembagianInput =>
+      parseRupiah(_langgeng.text) + parseRupiah(_juki.text) + parseRupiah(_rio.text) +
+      parseRupiah(_kas.text) + parseRupiah(_kasVapor.text) + parseRupiah(_kasMaintenance.text);
+
+  String get _statusPembayaranPreview {
+    if (totalHarga <= 0 || _totalPembagianInput <= 0) return 'Belum Bayar';
+    if (_totalPembagianInput >= totalHarga) return 'Lunas';
+    return 'DP';
+  }
+
+  Color _statusPembayaranColor(String s) {
+    switch (s) {
+      case 'Lunas': return const Color(0xFF1B7A3D);
+      case 'DP': return const Color(0xFF854F0B);
+      default: return Colors.grey.shade700;
+    }
+  }
+
   Future<void> _pilihTanggal() async {
     final d = await showDatePicker(context: context, initialDate: tanggal, firstDate: DateTime(2020), lastDate: DateTime(2100));
     if (d != null) setState(() => tanggal = d);
@@ -118,6 +139,10 @@ class _OrderFormPageState extends State<OrderFormPage> {
     }
     if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tambahkan minimal 1 barang')));
+      return;
+    }
+    if (_totalPembagianInput > totalHarga) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Total Pembagian & Kas tidak boleh melebihi Total Harga')));
       return;
     }
     final noTrxBaru = _noTransaksi.text.trim();
@@ -273,23 +298,57 @@ class _OrderFormPageState extends State<OrderFormPage> {
           const SizedBox(height: 20),
           _cardWrapper('Pembagian', [
             Row(children: [
-              Expanded(child: TextField(controller: _langgeng, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'Langgeng', border: OutlineInputBorder()))),
+              Expanded(child: TextField(controller: _langgeng, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Langgeng', border: OutlineInputBorder()))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _juki, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'Juki', border: OutlineInputBorder()))),
+              Expanded(child: TextField(controller: _juki, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Juki', border: OutlineInputBorder()))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _rio, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'Rio', border: OutlineInputBorder()))),
+              Expanded(child: TextField(controller: _rio, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Rio', border: OutlineInputBorder()))),
             ]),
           ]),
           const SizedBox(height: 16),
           _cardWrapper('KAS (isi salah satu atau kosongkan semua)', [
             Row(children: [
-              Expanded(child: TextField(controller: _kas, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'KAS', border: OutlineInputBorder()))),
+              Expanded(child: TextField(controller: _kas, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'KAS', border: OutlineInputBorder()))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _kasVapor, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'KAS Vapor', border: OutlineInputBorder()))),
+              Expanded(child: TextField(controller: _kasVapor, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'KAS Vapor', border: OutlineInputBorder()))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _kasMaintenance, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], decoration: const InputDecoration(labelText: 'KAS Maintenance', border: OutlineInputBorder()))),
+              Expanded(child: TextField(controller: _kasMaintenance, keyboardType: TextInputType.number, inputFormatters: [RupiahInputFormatter()], onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'KAS Maintenance', border: OutlineInputBorder()))),
             ]),
           ]),
+          const SizedBox(height: 12),
+          // Preview status pembayaran secara realtime berdasarkan total
+          // Pembagian & Kas yang sedang diisi, dibandingkan Total Harga --
+          // supaya user tahu efeknya SEBELUM menekan Simpan (menggantikan
+          // tombol "Tambah Pembayaran" yang sudah dihapus).
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _statusPembayaranColor(_statusPembayaranPreview).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _statusPembayaranColor(_statusPembayaranPreview).withOpacity(0.3)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                const Text('Total Pembagian & Kas', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                Text(
+                  formatRupiah(_totalPembagianInput),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: _totalPembagianInput > totalHarga ? Colors.red : null,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 4),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                const Text('Status Pembayaran', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                Text(_statusPembayaranPreview, style: TextStyle(fontWeight: FontWeight.bold, color: _statusPembayaranColor(_statusPembayaranPreview))),
+              ]),
+              if (_totalPembagianInput > totalHarga) ...[
+                const SizedBox(height: 6),
+                const Text('Total melebihi Total Harga, mohon dikoreksi', style: TextStyle(fontSize: 11, color: Colors.red)),
+              ],
+            ]),
+          ),
           const SizedBox(height: 16),
           TextField(controller: _catatan, decoration: const InputDecoration(labelText: 'Catatan (opsional)', border: OutlineInputBorder())),
           const SizedBox(height: 24),
