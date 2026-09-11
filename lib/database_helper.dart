@@ -981,6 +981,16 @@ class DatabaseHelper {
         SELECT SUM(COALESCE(pengeluaran_kas,0) + COALESCE(pengeluaran_vapor,0) + COALESCE(pengeluaran_alat,0)) as total
         FROM kas_keluar WHERE tanggal >= ? AND tanggal < ?
       ''', [awal, akhir]),
+      // Pemasukan AKTUAL (uang yang benar-benar sudah diterima/dibayar),
+      // dari tabel pembayaran -- sama persis dengan query di
+      // getLaporanKeuangan(), supaya "Laba Bersih" konsisten di semua
+      // halaman. JANGAN pakai omzet di sini: omzet adalah nilai seluruh
+      // barang/jasa yang di-order pada periode ini, termasuk yang masih
+      // berstatus piutang (belum dibayar), sehingga tidak mencerminkan
+      // uang yang sungguh-sungguh masuk.
+      db.rawQuery('''
+        SELECT SUM(nominal) as total FROM pembayaran WHERE tanggal >= ? AND tanggal < ?
+      ''', [awal, akhir]),
     ]);
 
     final omzetRow = results[0];
@@ -989,6 +999,7 @@ class DatabaseHelper {
     final belumDiambilRow = results[3];
     final piutangRows = results[4];
     final pengeluaranRow = results[5];
+    final pemasukanRow = results[6];
 
     final counts = {'pending': 0, 'antre': 0, 'proses': 0, 'selesai': 0};
     int total = 0;
@@ -1008,6 +1019,7 @@ class DatabaseHelper {
 
     final omzet = (omzetRow.first['total'] as num?)?.toDouble() ?? 0;
     final pengeluaran = (pengeluaranRow.first['total'] as num?)?.toDouble() ?? 0;
+    final pemasukan = (pemasukanRow.first['total'] as num?)?.toDouble() ?? 0;
 
     return {
       'omzet': omzet,
@@ -1022,7 +1034,13 @@ class DatabaseHelper {
       'belum_diambil': (belumDiambilRow.first['c'] as int?) ?? 0,
       'piutang': totalPiutang,
       'pengeluaran': pengeluaran,
-      'laba_bersih': omzet - pengeluaran,
+      // Pemasukan aktual (uang yang benar-benar diterima) pada periode ini.
+      'pemasukan': pemasukan,
+      // Laba bersih = pemasukan aktual - pengeluaran, BUKAN omzet -
+      // pengeluaran. Ini menyamakan definisi dengan getLaporanKeuangan()
+      // supaya angka "Laba Bersih" tidak berbeda antara Dashboard dan
+      // halaman Laporan Keuangan/Export untuk periode yang sama.
+      'laba_bersih': pemasukan - pengeluaran,
     };
   }
 
