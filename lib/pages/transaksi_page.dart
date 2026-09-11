@@ -82,6 +82,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
   Future<void> _gantiTahun(int tahunBaru) async {
     setState(() => tahun = tahunBaru);
     final bulanList = await DatabaseHelper.instance.getBulanTransaksiTersedia(tahunBaru);
+    if (!mounted) return;
     setState(() {
       bulanTersedia = bulanList.isEmpty ? [DateTime.now().month] : bulanList;
       if (!bulanTersedia.contains(bulan)) bulan = bulanTersedia.first;
@@ -117,6 +118,7 @@ class _TransaksiPageState extends State<TransaksiPage> {
             tanggalSelesai: filterTanggal?.end,
           )
         : await DatabaseHelper.instance.getTransaksiByBulan(bulan, tahun, search: search);
+    if (!mounted) return;
     setState(() { data = d; loading = false; });
   }
 

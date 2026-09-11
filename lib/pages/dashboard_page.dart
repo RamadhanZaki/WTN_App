@@ -39,6 +39,10 @@ class _DashboardPageState extends State<DashboardPage> {
       DatabaseHelper.instance.getOrderTerbaru(limit: 10),
       DatabaseHelper.instance.getPengaturan('grafik_omset_tipe', defaultValue: 'garis'),
     ]);
+    // Widget bisa saja sudah di-dispose selama query berjalan (mis. user
+    // pindah halaman sebelum Future.wait selesai) — cek `mounted` dulu
+    // sebelum setState, supaya tidak crash "setState() called after dispose()".
+    if (!mounted) return;
     setState(() {
       ringkasan = results[0] as Map<String, dynamic>;
       grafik = (results[1] as List<Map<String, dynamic>>).reversed.toList();
@@ -51,6 +55,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _gantiPeriode(int bulan) async {
     setState(() => periodeBulan = bulan);
     final g = await DatabaseHelper.instance.getGrafikOmzet(bulan);
+    if (!mounted) return;
     setState(() => grafik = g.reversed.toList());
   }
 
@@ -134,11 +139,13 @@ class _DashboardPageState extends State<DashboardPage> {
     );
 
     if (hasil != null) {
+      if (!mounted) return;
       setState(() {
         bulanRingkasan = hasil['bulan']!;
         tahunRingkasan = hasil['tahun']!;
       });
       final r = await DatabaseHelper.instance.getRingkasanBulanIni(bulan: bulanRingkasan, tahun: tahunRingkasan);
+      if (!mounted) return;
       setState(() => ringkasan = r);
     }
   }

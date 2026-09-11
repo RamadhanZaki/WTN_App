@@ -48,6 +48,7 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
   Future<void> _load() async {
     setState(() => loading = true);
     final s = await DatabaseHelper.instance.getSaldoTerakhir();
+    if (!mounted) return;
     setState(() {
       saldo = s;
       loading = false;
@@ -84,6 +85,7 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
       tanggalMulai: tanggalFilter?.start,
       tanggalSelesai: tanggalFilter?.end,
     );
+    if (!mounted) return;
     setState(() {
       riwayat = r;
       loadingRiwayat = false;
@@ -101,6 +103,7 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
       ]),
     );
     if (hasil != null) {
+      if (!mounted) return;
       setState(() => jenisKasFilter = hasil.isEmpty ? null : hasil);
       await _loadRiwayat();
     }
@@ -109,6 +112,7 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
   Future<void> _pilihRentangTanggal() async {
     final r = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDateRange: tanggalFilter);
     if (r != null) {
+      if (!mounted) return;
       setState(() => tanggalFilter = r);
       await _loadRiwayat();
     }
@@ -166,6 +170,7 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
     );
 
     if (hasil != null) {
+      if (!mounted) return;
       setState(() {
         bulanFilter = hasil['bulan']!;
         tahunFilter = hasil['tahun']!;
@@ -372,6 +377,10 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
       catatan: _catatan.text.trim(),
       tanggal: DateTime.now().toIso8601String().substring(0, 10),
     );
+    // Widget bisa sudah dispose selagi insertPengeluaran berjalan — kalau
+    // begitu, controller-nya juga sudah di-dispose duluan lewat dispose(),
+    // jadi jangan sentuh _nominal/_catatan atau panggil setState lagi.
+    if (!mounted) return;
     _nominal.clear();
     _catatan.clear();
     await _load();
@@ -381,8 +390,9 @@ class _KasKeluarPageState extends State<KasKeluarPage> {
     // selama masih valid, dan hanya pindah ke periode terbaru kalau filter
     // lama sudah tidak ada datanya sama sekali.
     await _initFilterRiwayat();
+    if (!mounted) return;
     setState(() => saving = false);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pengeluaran tersimpan')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pengeluaran tersimpan')));
   }
 
   @override

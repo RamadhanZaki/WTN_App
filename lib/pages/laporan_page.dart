@@ -103,6 +103,7 @@ class _LaporanKeuanganPageState extends State<LaporanKeuanganPage> {
     setState(() => loading = true);
     final (mulai, selesai) = _rentang();
     final d = await DatabaseHelper.instance.getLaporanKeuangan(mulai: mulai, selesai: selesai);
+    if (!mounted) return;
     setState(() { data = d; loading = false; });
   }
 
@@ -110,6 +111,7 @@ class _LaporanKeuanganPageState extends State<LaporanKeuanganPage> {
     final now = DateTime.now();
     final hasil = await _pilihBulanTahunDialog(context, bulanAwal: bulanTerpilih ?? now.month, tahunAwal: tahunTerpilih ?? now.year);
     if (hasil != null) {
+      if (!mounted) return;
       setState(() { bulanTerpilih = hasil.$1; tahunTerpilih = hasil.$2; filter = _FilterCepat.custom; });
       _load();
     }
@@ -225,6 +227,7 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
     setState(() => loading = true);
     final (mulai, selesai) = _rentang();
     final d = await DatabaseHelper.instance.getLaporanTransaksi(mulai: mulai, selesai: selesai);
+    if (!mounted) return;
     setState(() { data = d; loading = false; });
   }
 
@@ -232,6 +235,7 @@ class _LaporanTransaksiPageState extends State<LaporanTransaksiPage> {
     final now = DateTime.now();
     final hasil = await _pilihBulanTahunDialog(context, bulanAwal: bulanTerpilih ?? now.month, tahunAwal: tahunTerpilih ?? now.year);
     if (hasil != null) {
+      if (!mounted) return;
       setState(() { bulanTerpilih = hasil.$1; tahunTerpilih = hasil.$2; filter = _FilterCepat.custom; });
       _load();
     }
