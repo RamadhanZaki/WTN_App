@@ -1173,9 +1173,32 @@ class DatabaseHelper {
   // ---------- KATALOG BARANG (autocomplete barang/part yang dikerjakan) ----------
   // Terpisah dari harga_bahan (itu catatan pembelian material, bukan katalog part).
 
-  Future<List<Map<String, dynamic>>> cariBarang(String q) async {
+  // Rekomendasi barang saat mengetik di form "Tambah Barang". STRICT per
+  // Type Motor: kalau motor sudah dipilih di order, hanya barang yang
+  // PERNAH dipakai untuk motor itu (dari harga_kombinasi) yang disarankan
+  // -- supaya mis. Type Motor "Vario" tidak pernah disarankan "Bak Kanan
+  // Kiri" (part motor manual/bebek), walau nama itu ada di katalog umum.
+  // Barang yang sama bisa punya beberapa harga (beda Proses) untuk motor
+  // ini; yang ditampilkan adalah harga dari kombinasi yang PALING BARU
+  // di-update (lewat trik bare-column SQLite: kolom biasa di query yang
+  // ada MAX() ikut row yang sama dengan nilai MAX() itu).
+  // Kalau motor belum dipilih (order baru, motor masih null/kosong), tetap
+  // fallback ke katalog umum seperti sebelumnya.
+  Future<List<Map<String, dynamic>>> cariBarang(String q, {String? motor}) async {
     final db = await database;
     if (q.isEmpty) return [];
+
+    if (motor != null && motor.trim().isNotEmpty) {
+      return await db.rawQuery('''
+        SELECT barang as nama_barang, harga as harga_terakhir, MAX(updated_at) as _terbaru
+        FROM harga_kombinasi
+        WHERE motor = ? COLLATE NOCASE AND barang LIKE ? AND harga IS NOT NULL
+        GROUP BY barang
+        ORDER BY barang ASC
+        LIMIT 8
+      ''', [motor.trim(), '%$q%']);
+    }
+
     return await db.query(
       'katalog_barang',
       where: 'nama_barang LIKE ? AND aktif = 1',

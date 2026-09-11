@@ -490,7 +490,7 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
     // Di-debounce 300ms supaya tidak query berlebihan saat mengetik cepat.
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () async {
-      final hasil = await DatabaseHelper.instance.cariBarang(q);
+      final hasil = await DatabaseHelper.instance.cariBarang(q, motor: widget.motor);
       if (mounted) setState(() => saran = hasil);
     });
   }
@@ -566,6 +566,14 @@ class _TambahBarangSheetState extends State<_TambahBarangSheet> {
               decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
               child: Column(
                 children: [
+                  if (saran.isEmpty && widget.motor != null && widget.motor!.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        'Belum ada histori barang ini untuk Type Motor "${widget.motor}"',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                      ),
+                    ),
                   ...saran.map((s) => ListTile(
                     dense: true,
                     title: Text(s['nama_barang']),
