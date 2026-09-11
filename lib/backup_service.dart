@@ -127,7 +127,9 @@ class BackupService {
   }
 
   // Download backup terbaru dari Drive dan menimpa database lokal.
-  // Setelah ini koneksi database ditutup supaya file yang baru dibaca ulang.
+  // Koneksi database ditutup TERLEBIH DAHULU sebelum file ditimpa, supaya
+  // tidak terjadi race condition antara penulisan file baru dengan koneksi
+  // SQLite lama yang masih terbuka.
   Future<void> restoreDariDrive() async {
     final api = await _driveApi();
     final folderId = await _cariAtauBuatFolder(api);
@@ -141,13 +143,24 @@ class BackupService {
       downloadOptions: drive.DownloadOptions.fullMedia,
     ) as drive.Media;
 
+    // Tutup koneksi database LEBIH DULU sebelum file-nya ditimpa, supaya
+    // tidak ada koneksi SQLite yang masih aktif/mengunci file lama saat
+    // proses penulisan file baru berlangsung (race condition: kalau file
+    // ditimpa sementara koneksi lama masih terbuka, hasilnya bisa file
+    // korup atau koneksi lama tetap membaca cache/data basi).
+    await DatabaseHelper.instance.tutupDatabase();
+
     final path = await _dbPath();
     final file = File(path);
     final sink = file.openWrite();
-    await media.stream.pipe(sink);
-    await sink.close();
-
-    await DatabaseHelper.instance.tutupDatabase();
+    try {
+      await media.stream.pipe(sink);
+    } finally {
+      await sink.close();
+    }
+    // Setelah ini, akses berikutnya ke DatabaseHelper.instance.database akan
+    // otomatis membuka ulang koneksi baru dari file database yang baru saja
+    // dipulihkan (lazy re-init di getter `database`).
   }
 
   Future<String?> getBackupTerakhir() async {
