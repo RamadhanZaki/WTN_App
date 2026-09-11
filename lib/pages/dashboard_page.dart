@@ -184,7 +184,10 @@ class _DashboardPageState extends State<DashboardPage> {
                     const Text('Orderan Terbaru', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TransaksiPage())), child: const Text('Lihat Semua')),
                   ]),
-                  Text('Menampilkan ${terbaru.length} transaksi terbaru', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  Text(
+                    'Menampilkan ${terbaru.length} transaksi terbaru bulan ${bulanNama[DateTime.now().month]} ${DateTime.now().year}',
+                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
                   const SizedBox(height: 8),
                   ...terbaru.map(_orderTile),
                 ],
@@ -309,13 +312,7 @@ class _DashboardPageState extends State<DashboardPage> {
       Row(children: [
         Expanded(child: _ringkasanTile('Belum Diambil', ringkasan['belum_diambil'] ?? 0, Icons.inventory_2, const Color(0xFFB5541B))),
         const SizedBox(width: 10),
-        Expanded(child: _ringkasanTile('Piutang', ringkasan['piutang'] ?? 0, Icons.receipt_long, const Color(0xFFB02A2A), isRupiah: true)),
-      ]),
-      const SizedBox(height: 10),
-      Row(children: [
         Expanded(child: _ringkasanTile('Pengeluaran', ringkasan['pengeluaran'] ?? 0, Icons.trending_down, const Color(0xFF6A3FA0), isRupiah: true)),
-        const SizedBox(width: 10),
-        Expanded(child: _ringkasanTile('Laba Bersih', ringkasan['laba_bersih'] ?? 0, Icons.savings, const Color(0xFF1B7A3D), isRupiah: true)),
       ]),
     ]);
   }

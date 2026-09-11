@@ -368,6 +368,46 @@ class _TransaksiPageState extends State<TransaksiPage> {
     );
   }
 
+  // Konfirmasi & eksekusi hapus transaksi. Sengaja pakai dialog 2 langkah
+  // (tombol "Hapus" berwarna merah + teks peringatan tegas) supaya tidak
+  // kepencet tidak sengaja. Setiap penghapusan otomatis tercatat di Audit
+  // Log lewat DatabaseHelper.deleteOrder, jadi tetap bisa ditelusuri.
+  Future<void> _konfirmasiHapus(Map<String, dynamic> t) async {
+    final yakin = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus Transaksi?'),
+        content: Text(
+          'Transaksi #${t['no_transaksi'] ?? '-'} (${t['asal'] ?? '-'}) akan dihapus permanen beserta seluruh rincian barangnya. '
+          'Tindakan ini tidak bisa dibatalkan.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ya, Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (yakin != true) return;
+
+    try {
+      await DatabaseHelper.instance.deleteOrder(t['id'] as int);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Transaksi #${t['no_transaksi'] ?? '-'} berhasil dihapus')),
+      );
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal menghapus transaksi: $e')),
+      );
+    }
+  }
+
   Widget _card(Map<String, dynamic> t) {
     final status = (t['status'] ?? 'pending') as String;
     final statusBayar = (t['status_pembayaran'] ?? 'belum_bayar') as String;
@@ -383,7 +423,18 @@ class _TransaksiPageState extends State<TransaksiPage> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Text('#${t['no_transaksi'] ?? '-'}', style: TextStyle(color: AppColors.biruTua, fontWeight: FontWeight.bold)),
-              Text(t['tanggal'] ?? '-', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              Row(children: [
+                Text(t['tanggal'] ?? '-', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: () => _konfirmasiHapus(t),
+                  borderRadius: BorderRadius.circular(16),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                  ),
+                ),
+              ]),
             ]),
             const SizedBox(height: 8),
             _baris('Nama', t['asal']),

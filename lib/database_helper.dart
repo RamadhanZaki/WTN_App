@@ -649,10 +649,26 @@ class DatabaseHelper {
 
   // ---------- ORDER (HEADER + ITEMS) ----------
 
+  // PENTING: nomor transaksi baru HARUS berdasarkan nomor TERTINGGI yang
+  // pernah dipakai, BUKAN dari COUNT(*) baris di tabel. Kalau pakai COUNT,
+  // begitu ada transaksi yang dihapus, hitungan baris berkurang dan nomor
+  // baru bisa "mundur" lalu bentrok/dobel dengan transaksi lain yang masih
+  // ada (contoh: TRX-00229 dihapus -> COUNT turun -> transaksi baru
+  // kebagian TRX-00230 padahal itu sudah dipakai transaksi lain).
   Future<String> generateNoTransaksi() async {
     final db = await database;
-    final r = await db.rawQuery('SELECT COUNT(*) as c FROM transaksi');
-    final n = (r.first['c'] as int) + 1;
+    final rows = await db.rawQuery("SELECT no_transaksi FROM transaksi WHERE no_transaksi LIKE 'TRX-%'");
+    int maxN = 0;
+    final regex = RegExp(r'TRX-(\d+)');
+    for (final row in rows) {
+      final s = row['no_transaksi'] as String?;
+      if (s == null) continue;
+      final match = regex.firstMatch(s);
+      if (match == null) continue;
+      final v = int.tryParse(match.group(1)!) ?? 0;
+      if (v > maxN) maxN = v;
+    }
+    final n = maxN + 1;
     return 'TRX-${n.toString().padLeft(5, '0')}';
   }
 
@@ -688,6 +704,22 @@ class DatabaseHelper {
       }
     });
     await catatAudit('Mengubah transaksi ${header['no_transaksi'] ?? '#$id'}');
+  }
+
+  // Menghapus transaksi (header + seluruh order_items-nya) secara permanen.
+  // Dipakai untuk mengoreksi transaksi yang salah input. Setiap penghapusan
+  // WAJIB tercatat di Audit Log supaya tetap bisa ditelusuri siapa & kapan
+  // menghapus, serta data apa yang hilang (no. transaksi & asal pelanggan).
+  Future<void> deleteOrder(int id) async {
+    final db = await database;
+    final header = await getOrderHeader(id);
+    await db.transaction((txn) async {
+      await txn.delete('order_items', where: 'transaksi_id = ?', whereArgs: [id]);
+      await txn.delete('transaksi', where: 'id = ?', whereArgs: [id]);
+    });
+    final noTransaksi = header?['no_transaksi'] ?? '#$id';
+    final asal = header?['asal'] ?? '-';
+    await catatAudit('Menghapus transaksi $noTransaksi ($asal)');
   }
 
   Future<Map<String, dynamic>?> getOrderHeader(int id) async {
@@ -825,8 +857,14 @@ class DatabaseHelper {
     ''', args);
   }
 
+  // Menampilkan transaksi terbaru HANYA dari bulan berjalan (real-time,
+  // berdasarkan tanggal hari ini) — bukan 10 transaksi terakhir sepanjang
+  // waktu. Kalau bulan ini belum ada transaksi, hasilnya kosong (bukan
+  // "nyasar" menampilkan transaksi bulan-bulan sebelumnya).
   Future<List<Map<String, dynamic>>> getOrderTerbaru({int limit = 15}) async {
     final db = await database;
+    final now = DateTime.now();
+    final (awal, akhir) = _rentangBulan(now.month, now.year);
     return await db.rawQuery('''
       SELECT t.*,
         (SELECT GROUP_CONCAT(barang, ', ') FROM order_items WHERE transaksi_id = t.id) as daftar_barang,
@@ -834,9 +872,10 @@ class DatabaseHelper {
         (SELECT GROUP_CONCAT(warna_lis, ', ') FROM order_items WHERE transaksi_id = t.id AND warna_lis IS NOT NULL AND warna_lis != '') as daftar_warna_lis,
         (SELECT COALESCE(SUM(harga), 0) FROM order_items WHERE transaksi_id = t.id) as total_harga
       FROM transaksi t
+      WHERE t.tanggal >= ? AND t.tanggal < ?
       ORDER BY t.tanggal DESC, t.id DESC
       LIMIT ?
-    ''', [limit]);
+    ''', [awal, akhir, limit]);
   }
 
   // ---------- DASHBOARD ----------
