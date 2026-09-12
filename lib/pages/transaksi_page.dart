@@ -102,6 +102,12 @@ class _TransaksiPageState extends State<TransaksiPage> {
     super.dispose();
   }
 
+  // Dipanggil dari luar (RootShell di main.dart) lewat GlobalKey setelah
+  // user selesai membuat/mengubah order dari FAB, supaya list transaksi
+  // langsung ter-refresh tanpa harus pindah tab atau pencet tombol
+  // refresh manual dulu.
+  void reload() => _initPeriodeDanLoad();
+
   Future<void> _load() async {
     setState(() => loading = true);
     final d = adaFilterAktif || search.isNotEmpty

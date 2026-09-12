@@ -38,6 +38,11 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell> {
   int _index = 0;
 
+  // GlobalKey supaya TransaksiPage bisa di-refresh langsung dari sini
+  // (lewat method reload()) setelah order baru dibuat/diubah, tanpa harus
+  // pindah tab dulu atau pencet tombol refresh manual di AppBar-nya.
+  final GlobalKey<State<TransaksiPage>> _transaksiKey = GlobalKey<State<TransaksiPage>>();
+
   @override
   void initState() {
     super.initState();
@@ -50,7 +55,7 @@ class _RootShellState extends State<RootShell> {
   Widget _buildBody() {
     switch (_index) {
       case 0: return const DashboardPage();
-      case 1: return const TransaksiPage();
+      case 1: return TransaksiPage(key: _transaksiKey);
       case 3: return const KasKeluarPage();
       case 4: return const LainnyaPage();
       default: return const DashboardPage();
@@ -66,6 +71,9 @@ class _RootShellState extends State<RootShell> {
         shape: const CircleBorder(),
         onPressed: () async {
           await Navigator.push(context, MaterialPageRoute(builder: (_) => const OrderFormPage()));
+          // Refresh halaman Transaksi walau sedang aktif di tab itu, biar
+          // order baru langsung muncul tanpa harus ganti tab / refresh manual.
+          (_transaksiKey.currentState as dynamic)?.reload();
           setState(() {});
         },
         child: const Icon(Icons.add, color: Colors.white, size: 32),

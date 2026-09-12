@@ -3,7 +3,6 @@
 // demo yang tidak pernah ada di aplikasi ini — sudah tidak sesuai sejak lama,
 // diperbaiki di sini supaya `flutter analyze`/`flutter test` tidak error.)
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:wtn_blasting_app/main.dart';

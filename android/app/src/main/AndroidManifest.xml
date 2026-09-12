@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Wajib ada di manifest UTAMA (bukan cuma di debug/profile) karena
+         fitur Login Google & Backup ke Google Drive butuh akses internet.
+         Sebelumnya permission ini cuma ada di src/debug & src/profile
+         (khusus tooling development Flutter), jadi build RELEASE akan
+         gagal total untuk fitur-fitur berbasis jaringan. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="WTN BLASTING"
         android:name="${applicationName}"
